@@ -1,15 +1,15 @@
-from collections import namedtuple, Callable
-from contextlib import AbstractContextManager
+from collections import namedtuple
 from enum import Enum
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import rtree
 import xarray as xr
 from sqlalchemy import text
 
-from config import WEATHER_FILE, WEATHER_START, WEATHER_END, CLIMATOLOGY_FILE
-
-GridLookupResults = namedtuple('GridLookupResults', ['lon', 'lat', 'weights'])
+import spatial_lookup
+from util import GridLookupResults
 
 
 def _weighted_grid_lookup(code, sql, db):
@@ -45,20 +45,34 @@ WEATHER_NAMES = [
     _Row('tp', 'precipitation'),
     _Row('d2m', 'temperature_dewpoint'),
     _Row('sp', 'surface_pressure'),
-    _Row('2T_GDS4_SFC', 'temperature_2m')
+    _Row('2T_GDS4_SFC', 'temperature_2m'),
+    _Row('g4_lat_1', 'latitude'),
+    _Row('g4_lon_2', 'longitude'),
+    _Row('initial_time0_hours', 'time')
 ]
 
 
-def weather_dataset(root_path):
-    return xr.open_dataset(root_path)
+def weather_dataset(root_path, rename=True):
+    data = xr.open_dataset(str(root_path))
+    if rename:
+        data = data.rename({r.ncdf_name: r.common_name for r in WEATHER_NAMES if r.ncdf_name in data.variables})
+    return data
 
 
-def climatology_dataset(file_path):
-    climatology = xr.open_dataset(file_path, decode_times=False)
-    synthetic_time = pd.date_range(start='1999-01-01', periods=len(climatology.initial_time0_hours.values), freq='6H')
-    climatology['initial_time0_hours'] = synthetic_time
-    climatology = climatology.drop(['initial_time0_encoded', 'initial_time0'])
-    return climatology.rename({'g4_lat_1': 'latitude', 'g4_lon_2': 'longitude', 'initial_time0_hours': 'time'})
+def climatology_dataset(file_path, rename=True, decode_time=True) -> xr.Dataset:
+    climatology = xr.open_dataset(str(file_path), decode_times=decode_time)
+
+    if 'initial_time0_encoded' in climatology.variables:
+        synthetic_time = pd.date_range(start='1999-01-01', periods=len(climatology.initial_time0_hours.values),
+                                       freq='6H')
+        climatology['initial_time0_hours'] = synthetic_time
+        climatology = climatology.drop(['initial_time0_encoded', 'initial_time0'])
+
+    if rename:
+        climatology = climatology.rename({r.ncdf_name: r.common_name
+                                          for r in WEATHER_NAMES if r.ncdf_name in climatology.variables})
+
+    return climatology
 
 
 def weighted_regional_timeseries(dataset: xr.Dataset, lon, lat, weights=None, start_timestamp=None,
@@ -131,18 +145,20 @@ class GridTable(Enum):
 
 
 def lookup_country_data(db, dataset, country_iso_3, start_date=None, end_date=None,
-                        resample=None, rename=True, grid_table=GridTable.era_interim_grid):
+                        resample=None, grid_table=GridTable.era_interim_grid):
     """
+    
+    Args:
+        db: 
+        dataset: 
+        country_iso_3: 
+        start_date: 
+        end_date: 
+        resample: 
+        grid_table: 
 
-    :param db:
-    :param dataset:
-    :param lookup_fn:
-    :param country_iso_3:
-    :param start_date:
-    :param end_date:
-    :param grid_table:
-    :param variables:
-    :return:
+    Returns:
+
     """
     grid_table = GridTable(grid_table)
     geo_lookup = lookup_country_grid(country_iso_3, db, grid_table.name)
@@ -150,105 +166,44 @@ def lookup_country_data(db, dataset, country_iso_3, start_date=None, end_date=No
     data = weighted_regional_timeseries(dataset, lon=geo_lookup.lon, lat=geo_lookup.lat, weights=geo_lookup.weights,
                                         start_timestamp=start_date, end_timestamp=end_date)
 
-    if rename:
-        renamer = {r.ncdf_name: r.common_name for r in WEATHER_NAMES if r.ncdf_name in data.variables}
-        data = data.rename(renamer)
-
     if resample is not None:
-        # Using Xarray resample method rather than pandas dataframe method
         data = data.resample(resample, dim='time')
 
     return data
 
 
-# TODO decide whether I bother keeping any of this
-class EraWeather(AbstractContextManager, Callable):
+def lookup_shape_data(dataset, shape, start_date=None, end_date=None, resample=None):
     """
-    Wraps up an Xarray dataset configured to access the weather data.
-    Behaves like a Dataset through delegation and can be used in a context manager -
-    this is useful since setting up a dataset can be slow, and needs to be cleaned up
-    after loading to avoid bugs/leaks. Using it in a context manager means you
-    open it once and automatically clean up afterwards.
+    
+    Args:
+        dataset: 
+        shape: 
+        start_date: 
+        end_date: 
+        resample: 
 
-    Is also callable to enable 'functional style' processing - passes through to
-    `lookup_site_data` method
+    Returns:
+
     """
+    index = get_index(dataset)
+    geo_lookup = spatial_lookup.find_in_index(shape, index)
+    data = weighted_regional_timeseries(dataset, lon=geo_lookup.lon, lat=geo_lookup.lat, weights=geo_lookup.weights,
+                                        start_timestamp=start_date, end_timestamp=end_date)
 
-    def __init__(self, db, dset_start=None, dset_end=None, resample=None):
-        """
+    if resample is not None:
+        data = data.resample(resample, dim='time')
 
-        :param db:
-        :param lookup_fn:
-        :param dset_start:
-        :param dset_end:
-        :param site_conf:
-        :param variables: list of 'common names' of variables to load, so that you can reduce the number
-        of variables needed if you want.
-        """
-        self.dset_start = dset_start if dset_start else WEATHER_START
-        self.dset_end = dset_end if dset_end else WEATHER_END
+    return data
 
-        self.db = db
 
-        self.resample = resample
+_INDEX = None
 
-        self.weather = weather_dataset(WEATHER_FILE)
-
-    def __exit__(self, type, value, traceback):
-        self.close()
-
-    def close(self):
-        self.weather.close()
-
-    def __call__(self, country_iso, start_date=None, end_date=None):
-        return self.lookup_site_data(country_iso, start_date, end_date)
-
-    def weather_for_country(self, country_iso, start_date=None, end_date=None) -> pd.DataFrame:
-        """
-
-        :param site:
-        :param start_date:
-        :param end_date:
-        :param resample: can override the setting for the WeatherData object
-        TODO: not sure if that is a good idea
-        :return:
-        """
-        if start_date is None or end_date is None:
-            start_date, end_date = self.dset_start, self.dset_end
-
-        if start_date is None or end_date is None:
-            raise ValueError('Must have a supply start/end date or a site with a valid time_range')
-
-        data = lookup_country_data(self.db, self.weather, country_iso, start_date, end_date, self.resample)
-
-        return data.to_dataframe()
-
-    def get_timeseries(self, start_dt, end_dt, lon, lat) -> xr.Dataset:
-        return self.weather.sel(time=slice(start_dt, end_dt)).sel_points(method='nearest',
-                                                                         tolerance=0.1,
-                                                                         lon=lon,
-                                                                         lat=lat)
-
-    def get_single_timeseries(self, start_date, end_date, lon, lat) -> xr.Dataset:
-        selection = self.weather.sel(time=slice(start_date, end_date)).sel_points(method='nearest',
-                                                                                  tolerance=0.1,
-                                                                                  lon=[lon], lat=[lat])
-
-        selection = selection.rename({r.ncdf_name: r.common_name for r in WEATHER_NAMES})
-
-        selection = selection.mean(dim='points')
-
-        return selection
-
-    def __getattr__(self, attr):
-        """
-        Delegation pattern: any attr or method calls will be automatically delegated to
-        the weather :class:`xarray.Dataset` if they are not found on the CfsrWeather object.
-
-        .. note:
-            If you chose to use the hack to include dew-point temperature, it will note be loaded
-            when using dataset methods like :meth:`xarray.Datset.sel`
-        :param attr:
-        :return:
-        """
-        return getattr(self.weather, attr)
+def get_index(dataset):
+    # TODO per-dataset index
+    global _INDEX
+    if not Path('era_interim.dat').is_file():
+        rects = spatial_lookup.weather_file_grid(dataset)
+        _INDEX = spatial_lookup.build_save_index(rects)
+    else:
+        _INDEX = rtree.index.Index('era_interim')
+    return _INDEX

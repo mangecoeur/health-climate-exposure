@@ -1,5 +1,6 @@
 import os
 import urllib.parse
+from collections import namedtuple
 
 import numpy as np
 import pandas
@@ -166,3 +167,6 @@ def postgis_geom(data):
 
     poly = postgis_rect(data)
     return point, poly
+
+
+GridLookupResults = namedtuple('GridLookupResults', ['lon', 'lat', 'weights'])

@@ -18,13 +18,33 @@
 import numpy as np
 
 
-# Tref = globe.tas[,, j]  # near surface air temperature
-# rhref = globe.hurs[,, j]
-# p = globe.psl[,, j] / 100
-#
+def calculate_relative_humidity(temperature, temperature_dewpoint):
+    """
+    RH = 100% x (E/Es)
 
+    where, according to an approximation of the Clausius-Clapeyron equation:
+    
+    E = E0 x exp[(L/Rv) x {(1/T0) - (1/Td)}] and
+    
+    Es = E0 x exp[(L/Rv) x {(1/T0) - (1/T)}]
+    
+    where E0 = 0.611 kPa, (L/Rv) = 5423 K (in Kelvin, over a flat surface of water), T0 = 273 K (Kelvin)
 
-# TODO check whether this should be done in ˚C or Kelvin
+    Returns:
+
+    """
+
+    E0 = 0.611
+    t_0 = 273.15
+    # (L / Rv) = 5423
+    L_over_RV = 5423
+    E = E0 * np.exp((L_over_RV) * ((1 / t_0) - (1 / temperature_dewpoint)))
+
+    Es = E0 * np.exp((L_over_RV) * ((1 / t_0) - (1 / temperature)))
+
+    RH = 100 * (E / Es)
+    return RH
+
 
 def calculate_wbt(t_ref, relative_humidity, surface_pressure):
     """Empirical calculation of wet bulb temperature from temperature, humidity, and pressure
@@ -47,9 +67,8 @@ def calculate_wbt(t_ref, relative_humidity, surface_pressure):
     e = -8.4150417E-10 * t_ref ** 3
     f = 4.4412543E-13 * t_ref ** 4
     g = 2.858487 * np.log(t_ref)
-    sat = 18.87643854 + a + b + c + d + e + f + g
-    e_sat = np.exp(sat) / 100
-
+    e_sat = np.exp(18.87643854 + a + b + c + d + e + f + g) / 100
+    surface_pressure = surface_pressure / 100
     w_sat = 621.97 * e_sat / (surface_pressure - e_sat)
     humidity_frac = relative_humidity / 100
     w = humidity_frac * w_sat
@@ -57,9 +76,9 @@ def calculate_wbt(t_ref, relative_humidity, surface_pressure):
     t_e = t_ref * (1000 / surface_pressure) ** (0.2854 * (1 - 0.28E-3 * w)) * np.exp(
         (3.376 / t_l - 0.00254) * w * (1 + 0.81E-3 * w))
 
-    wbt = 45.114 - 51.489 * (t_e / 273.15) ** (-3.504)
-
-    return wbt
+    wbt = 45.114 - 51.489 * (t_e / 273.15) ** (-3.504)  # in ˚C
+    # Standardize on kelvin for sanity
+    return wbt + 273.15
 
 
 def calculate_wbgt(t_ref, relative_humidity, surface_pressure):
@@ -71,8 +90,9 @@ def calculate_wbgt(t_ref, relative_humidity, surface_pressure):
         surface_pressure: 
 
     Returns:
-        WBGT (˚C)
+        WBGT (K)
     """
     wbt = calculate_wbt(t_ref, relative_humidity, surface_pressure)
-    wbgt = 0.7 * wbt + 0.3 * (t_ref - 273.15)
-    return wbgt
+    # Formula supplied in ˚C but want everything in Kelvin
+    wbgt = 0.7 * (wbt - 273.15) + 0.3 * (t_ref - 273.15)
+    return wbgt + 273.15
