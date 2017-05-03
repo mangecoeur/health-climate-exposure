@@ -3,12 +3,15 @@ Interpolate the NASA gridded populations, given every 5 years
 to get population grid for every year. Do this with a simple 
 linear interpolation.
 """
+from contextlib import AbstractContextManager
+
 import numpy as np
 import pandas as pd
 import rasterio
 import xarray as xr
 from affine import Affine
 from numba import jit
+from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 
@@ -66,33 +69,6 @@ def lin_interp(year_one, interval):
     gradient = (population_two - population_one) / interval
     return population_one, gradient
 
-
-def interp_to_gtiff(intercept, gradient, interval, year):
-    """
-    Do the interpolation directly into the file to save on memory.
-    Args:
-        intercept: 
-        gradient: 
-        interval: 
-
-    Returns:
-
-    """
-    common_crs, common_trns = get_crs_and_affine()
-
-    with rasterio.open(str(POP_DATA_SRC / f'population_interp_{year}_{year+interval}.tif'),
-                       'w',
-                       driver='GTiff',
-                       height=intercept.shape[0],
-                       width=intercept.shape[1],
-                       count=interval,
-                       dtype=intercept.dtype,
-                       crs=common_crs,
-                       transform=common_trns,
-                       compress='lzw') as new_dataset:
-        for i in range(interval):
-            pop_for_year = intercept + i * gradient
-            new_dataset.write(pop_for_year, i + 1)  # gtiff bands numbered from 1
 
 
 def interp_to_netcdf():
@@ -192,8 +168,6 @@ def save_population_geotiff(newtrans, pop_meta, population, year):
 def do_derez():
     global year
     from concurrent.futures import ProcessPoolExecutor
-    # year = 2005
-    # pop_year = sys.argv[1]
     with ProcessPoolExecutor(max_workers=8) as executor:
         for year in [2000, 2005, 2010, 2015, 2020]:
             # for year in [2020]:
@@ -205,12 +179,127 @@ def do_derez():
 
             executor.submit(derez_population, population_file, year, 3)
 
+@jit
+def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon, out_time):
+    reproj = np.empty(shape=shape[0:2])
+    reproject(
+        src_data.values, reproj,
+        src_transform=src_affine,
+        dst_transform=out_affine,
+        src_crs=crs,
+        dst_crs=crs,
+        resample=Resampling.cubic_spline)
+
+    # reproj.shape = (shape[0], shape[1], 1)
+    # Wrap as DataArray to make sure the coordinates line up
+    reproj = xr.DataArray(reproj,
+                             coords={'latitude': out_lat,
+                                     'longitude': out_lon,
+                                     # 'time': out_time
+                                     },
+                             dims=['latitude', 'longitude',
+                                   # 'time'
+                                   ])
+    return reproj
 
 
+@jit
+def project_to_population(year, src_data, pop_data, src_affine, out_affine, crs):
+    pop_year = pop_data.population.sel(time='{year}'.format(year=year))
 
-            # derez_population(population_file, pop_year, 2)
+    resamp = reproject_to(pop_year.shape, src_data,
+                          src_affine, out_affine, crs,
+                          pop_year.latitude, pop_year.longitude, pop_year.time)
+    res = pop_year * resamp
+    return res
+
+
+class PopulationProjector(AbstractContextManager):
+    def __init__(self, population_file='population_2000-2020.nc'):
+        self.crs = CRS({'init': 'epsg:4326'})
+
+        pop_file = POP_DATA_SRC / population_file
+        self.data = xr.open_dataset(str(pop_file))
+
+        lon = self.data.longitude
+        lat = self.data.latitude
+        dx = (lon[1] -lon[0]).values
+        px = lon[0].values
+
+        dy = (lat[1] - lat[0]).values
+        py = lat[0].values
+
+        self.population_affine = Affine(dx, 0, px, 0, dy, py)
+
+    def project(self, year, param: xr.DataArray):
+        # TODO: might need to modify for when you also want to project demographic data
+
+        lon = param.longitude if 'longitude' in param.coords else param.lon
+        lat = param.latitude if 'latitude' in param.coords else param.lat
+        dx = (lon[1] -lon[0]).values
+        px = lon[0].values
+
+        dy = (lat[1] - lat[0]).values
+        py = lat[0].values
+
+        input_affine = Affine(dx, 0, px, 0, dy, py)
+        return project_to_population(year, param, self.data, input_affine, self.population_affine, self.crs)
+
+    def project_intermediate(self, year, param: xr.DataArray):
+        # TODO: might need to modify for when you also want to project demographic data
+
+        lon = param.longitude if 'longitude' in param.coords else param.lon
+        lat = param.latitude if 'latitude' in param.coords else param.lat
+        dx = (lon[1] -lon[0]).values
+        px = lon[0].values
+
+        dy = (lat[1] - lat[0]).values
+        py = lat[0].values
+
+        input_affine = Affine(dx, 0, px, 0, dy, py)
+        return reproject_to(self.data.population.shape, param, input_affine, self.population_affine, self.crs,
+                            self.data.latitude, self.data.longitude, [year])
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.data.close()
 
 
 if __name__ == '__main__':
     # do_derez()
     interp_to_netcdf()
+
+
+# --------------------
+# Deprioritised work
+# --------------------
+
+def interp_to_gtiff(intercept, gradient, interval, year):
+    """
+    NOTE: preferred to do this to netcdf.
+    
+    Do the interpolation directly into the file to save on memory.
+    
+    Args:
+        intercept: 
+        gradient: 
+        interval: 
+
+    Returns:
+
+    """
+    common_crs, common_trns = get_crs_and_affine()
+
+    with rasterio.open(str(POP_DATA_SRC / f'population_interp_{year}_{year+interval}.tif'),
+                       'w',
+                       driver='GTiff',
+                       height=intercept.shape[0],
+                       width=intercept.shape[1],
+                       count=interval,
+                       dtype=intercept.dtype,
+                       crs=common_crs,
+                       transform=common_trns,
+                       compress='lzw') as new_dataset:
+        for i in range(interval):
+            pop_for_year = intercept + i * gradient
+            new_dataset.write(pop_for_year, i + 1)  # gtiff bands numbered from 1
+
