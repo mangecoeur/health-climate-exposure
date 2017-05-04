@@ -20,10 +20,18 @@ from config import POP_DATA_SRC
 # REZ_FIX = 'quartres'
 REZ_FIX = 'eightres'
 
+POP_TYPE = 'density'
+_POPULATION_PATH_TEMPLATE = 'population_{year}_{resolution}.tif'
+# _POP_SRC = POP_DATA_SRC / 'nasa_grid' / 'count'
+_POP_SRC = POP_DATA_SRC / 'nasa_grid' / POP_TYPE
+# _POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
+# _POP_ORIGINAL_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
+_POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals-{year}'
+_POP_ORIGINAL_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals_{year}'
 
 def get_shape():
     year_one = 2000
-    population_file_path_one = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_one}_{REZ_FIX}.tif'
+    population_file_path_one = _POP_SRC / f'population_{year_one}_{REZ_FIX}.tif'
 
     with rasterio.open(str(population_file_path_one)) as pop:
         width = pop.width
@@ -35,13 +43,14 @@ def get_shape():
 
 def get_crs_and_affine():
     year_one = 2000
-    population_file_path_one = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_one}_{REZ_FIX}.tif'
+    population_file_path_one = _POP_SRC / f'population_{year_one}_{REZ_FIX}.tif'
 
     with rasterio.open(str(population_file_path_one)) as pop:
         pop_meta = pop.meta
         pop_trns = pop.transform
 
     return pop_meta['crs'], pop_trns
+
 
 def get_era_compat_crs_affine():
     common_crs, common_trns = get_crs_and_affine()
@@ -51,14 +60,17 @@ def get_era_compat_crs_affine():
     era_compat_affine = Affine(dx, 0, 0, 0, dy, py)
     return common_crs, era_compat_affine
 
-
 def lin_interp(year_one, interval):
     # Grids are at 5 year intervals
     # interval = 5
     year_two = year_one + interval
 
-    population_file_path_one = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_one}_{REZ_FIX}.tif'
-    population_file_path_two = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_two}_{REZ_FIX}.tif'
+    population_file_path_one = _POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year_one,
+                                                                           resolution=REZ_FIX)
+    population_file_path_two =_POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year_two,
+                                                                          resolution=REZ_FIX)
+    # population_file_path_one = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_one}_{REZ_FIX}.tif'
+    # population_file_path_two = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_two}_{REZ_FIX}.tif'
 
     with rasterio.open(str(population_file_path_one)) as pop:
         population_one = pop.read(1)
@@ -104,11 +116,11 @@ def interp_to_netcdf():
     print(ds)
 
     print('Saving')
-    ds.to_netcdf(str(POP_DATA_SRC / 'population_2000-2020.nc'), format='NETCDF4',
+    ds.to_netcdf(str(POP_DATA_SRC / 'population_{type}_2000-2020.nc'.format(type=POP_TYPE)), format='NETCDF4',
                  encoding={'population': {
                      'zlib': True,
                  }}
-    )
+                 )
     print('Done')
 
 @jit
@@ -128,7 +140,7 @@ def create_timeseries(height, interval, width):
 
 
 
-def derez_population(population_file_path, year, n_iters=1):
+def derez_population(population_file_path, year, n_iters=1, how='sum'):
     with rasterio.open(str(population_file_path)) as pop:
         print(pop.meta)
         pop_meta = pop.meta
@@ -142,6 +154,8 @@ def derez_population(population_file_path, year, n_iters=1):
         population = population[::2, :] + population[1::2, :]
         # Sum every other column
         population = population[:, ::2] + population[:, 1::2]
+        if how == 'mean':
+            population = population / 4
         # Output affine scaled by 2
         trns = Affine(trns.a * 2, trns.b, trns.c, trns.d, trns.e * 2, trns.f)
     # Reduction to 1/4 of the original size already makes life much easier
@@ -151,7 +165,8 @@ def derez_population(population_file_path, year, n_iters=1):
 def save_population_geotiff(newtrans, pop_meta, population, year):
     print('Saving')
     print(population.shape)
-    with rasterio.open(str(POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year}_{REZ_FIX}.tif'),
+    with rasterio.open(str(_POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year,
+                                                                       resolution=REZ_FIX)),
                        'w',
                        driver='GTiff',
                        height=population.shape[0],
@@ -165,19 +180,18 @@ def save_population_geotiff(newtrans, pop_meta, population, year):
         # new_dataset.write_mask(np.invert(population.mask))
 
 
-def do_derez():
+def do_derez(how='sum'):
     global year
     from concurrent.futures import ProcessPoolExecutor
     with ProcessPoolExecutor(max_workers=8) as executor:
         for year in [2000, 2005, 2010, 2015, 2020]:
             # for year in [2020]:
             print(f'Proc for {year}')
+            population_file = (_POP_SRC /
+                               _POP_ORIGINAL_FOLDER_TMPL.format(type=POP_TYPE, year=year) /
+                               (_POP_ORIGINAL_TMPL.format(type=POP_TYPE, year=year) + '.tif'))
 
-            population_file = (POP_DATA_SRC / 'nasa_grid' / 'count' /
-                               f'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}' /
-                               f'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals_{year}.tif')
-
-            executor.submit(derez_population, population_file, year, 3)
+            executor.submit(derez_population, population_file, year, 3, how)
 
 @jit
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon, out_time):
@@ -215,7 +229,7 @@ def project_to_population(year, src_data, pop_data, src_affine, out_affine, crs)
 
 
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file='population_2000-2020.nc'):
+    def __init__(self, population_file='population_count_2000-2020.nc'):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
@@ -265,7 +279,7 @@ class PopulationProjector(AbstractContextManager):
 
 
 if __name__ == '__main__':
-    # do_derez()
+    do_derez(how='mean')
     interp_to_netcdf()
 
 

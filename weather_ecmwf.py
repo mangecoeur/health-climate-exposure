@@ -186,7 +186,7 @@ def lookup_shape_data(dataset, shape, start_date=None, end_date=None, resample=N
 
     """
     index = get_index(dataset)
-    geo_lookup = spatial_lookup.find_in_index(shape, index)
+    geo_lookup = spatial_lookup.find_shape_in_index(shape, index)
     data = weighted_regional_timeseries(dataset, lon=geo_lookup.lon, lat=geo_lookup.lat, weights=geo_lookup.weights,
                                         start_timestamp=start_date, end_timestamp=end_date)
 

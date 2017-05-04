@@ -16,6 +16,7 @@
 #  WBGT is the array of the sum of all model wet bulb globe temperatures at each time step
 
 import numpy as np
+from numba import jit
 
 
 def calculate_relative_humidity(temperature, temperature_dewpoint):
@@ -46,6 +47,7 @@ def calculate_relative_humidity(temperature, temperature_dewpoint):
     return RH
 
 
+@jit
 def calculate_wbt(t_ref, relative_humidity, surface_pressure):
     """Empirical calculation of wet bulb temperature from temperature, humidity, and pressure
 
@@ -81,6 +83,7 @@ def calculate_wbt(t_ref, relative_humidity, surface_pressure):
     return wbt + 273.15
 
 
+@jit
 def calculate_wbgt(t_ref, relative_humidity, surface_pressure):
     """
     

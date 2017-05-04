@@ -1,7 +1,8 @@
 from pathlib import Path
 
 DATA_SRC = Path('~/Data/').expanduser()
-POP_DATA_SRC = DATA_SRC / 'humans' / 'population'
+HUMANS_SRC = DATA_SRC / 'humans'
+POP_DATA_SRC = HUMANS_SRC / 'population'
 SHAPEFILES_SRC = DATA_SRC / 'GIS' / 'world'
 
 ERA_2015 = DATA_SRC / 'weather' / 'ecmwf' / 'ecmwf_era_interim_2014-2017_compress.nc'

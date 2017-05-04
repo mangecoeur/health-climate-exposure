@@ -125,7 +125,7 @@ def get_index():
     return _INDEX
 
 
-def find_in_index(shape: BaseGeometry, index):
+def find_shape_in_index(shape: BaseGeometry, index):
     # (minx, miny, maxx, maxy)
     bounds = shape.bounds
 
@@ -153,7 +153,7 @@ def find_in_index(shape: BaseGeometry, index):
 
 
 def find_in_era(shape):
-    return find_in_index(shape, get_index())
+    return find_shape_in_index(shape, get_index())
 
 # import cartopy
 #
