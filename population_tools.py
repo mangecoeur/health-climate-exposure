@@ -228,6 +228,24 @@ def project_to_population(year, src_data, pop_data, src_affine, out_affine, crs)
     return res
 
 
+def get_affine(data):
+    """
+    Get an Affine transform from a data object with longitude and latitude attributes
+    Args:
+        data: 
+
+    Returns:
+
+    """
+    lon = data.longitude
+    lat = data.latitude
+    dx = (lon[1] - lon[0]).values
+    px = lon[0].values
+    dy = (lat[1] - lat[0]).values
+    py = lat[0].values
+    return Affine(dx, 0, px, 0, dy, py)
+
+
 class PopulationProjector(AbstractContextManager):
     def __init__(self, population_file='population_count_2000-2020.nc'):
         self.crs = CRS({'init': 'epsg:4326'})
@@ -235,15 +253,9 @@ class PopulationProjector(AbstractContextManager):
         pop_file = POP_DATA_SRC / population_file
         self.data = xr.open_dataset(str(pop_file))
 
-        lon = self.data.longitude
-        lat = self.data.latitude
-        dx = (lon[1] -lon[0]).values
-        px = lon[0].values
+        self.population_affine = get_affine(self.data)
 
-        dy = (lat[1] - lat[0]).values
-        py = lat[0].values
 
-        self.population_affine = Affine(dx, 0, px, 0, dy, py)
 
     def project(self, year, param: xr.DataArray):
         # TODO: might need to modify for when you also want to project demographic data
