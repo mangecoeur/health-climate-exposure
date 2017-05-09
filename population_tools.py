@@ -4,6 +4,7 @@ to get population grid for every year. Do this with a simple
 linear interpolation.
 """
 from contextlib import AbstractContextManager
+from enum import Enum
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ import rasterio
 import xarray as xr
 from affine import Affine
 from numba import jit
+from rasterio import features
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
@@ -245,9 +247,14 @@ def get_affine(data):
     py = lat[0].values
     return Affine(dx, 0, px, 0, dy, py)
 
+#
+# class PopulationType(Enum):
+#     count = 'population_count_2000-2020.nc'
+#     density = 'population_density_2000-2020.nc'
+#
 
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file='population_count_2000-2020.nc'):
+    def __init__(self, population_file='population_count_2000-2020.nc', overlay_data=None, overlay_key='values'):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
@@ -255,7 +262,20 @@ class PopulationProjector(AbstractContextManager):
 
         self.population_affine = get_affine(self.data)
 
+        self.overlay = None
 
+        # TODO should i rasterize an input here, or just pre-process it for each indicator
+        if overlay_data:
+            self.overlay = self.rasterize_data(overlay_data, overlay_key)
+
+
+    def rasterize_data(self, table, key):
+        raster = features.rasterize(
+            ((r.geometry, r[key]) for _, r in table.iterrows()),
+            out_shape=self.data.population.shape[:2],
+            transform=self.population_affine
+        )
+        return raster
 
     def project(self, year, param: xr.DataArray):
         # TODO: might need to modify for when you also want to project demographic data
@@ -269,7 +289,11 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        return project_to_population(year, param, self.data, input_affine, self.population_affine, self.crs)
+        projected = project_to_population(year, param, self.data, input_affine, self.population_affine, self.crs)
+        if self.overlay:
+            projected = projected * self.overlay
+
+        return projected
 
     def project_intermediate(self, year, param: xr.DataArray):
         # TODO: might need to modify for when you also want to project demographic data
