@@ -19,17 +19,6 @@ from rasterio.warp import reproject
 
 from config import POP_DATA_SRC
 
-# REZ_FIX = 'quartres'
-REZ_FIX = 'eightres'
-
-POP_TYPE = 'density'
-_POPULATION_PATH_TEMPLATE = 'population_{year}_{resolution}.tif'
-# _POP_SRC = POP_DATA_SRC / 'nasa_grid' / 'count'
-_POP_SRC = POP_DATA_SRC / 'nasa_grid' / POP_TYPE
-# _POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
-# _POP_ORIGINAL_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
-_POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals-{year}'
-_POP_ORIGINAL_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals_{year}'
 
 def get_shape():
     year_one = 2000
@@ -140,8 +129,6 @@ def create_timeseries(height, interval, width):
     return out
 
 
-
-
 def derez_population(population_file_path, year, n_iters=1, how='sum'):
     with rasterio.open(str(population_file_path)) as pop:
         print(pop.meta)
@@ -220,13 +207,12 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon,
 
 
 @jit
-def project_to_population(year, src_data, pop_data, src_affine, out_affine, crs):
-    pop_year = pop_data.population.sel(time='{year}'.format(year=year))
+def project_to_population(src_data, mult_data, src_affine, out_affine, crs):
 
-    resamp = reproject_to(pop_year.shape, src_data,
+    resamp = reproject_to(mult_data.shape, src_data,
                           src_affine, out_affine, crs,
-                          pop_year.latitude, pop_year.longitude, pop_year.time)
-    res = pop_year * resamp
+                          mult_data.latitude, mult_data.longitude, mult_data.time)
+    res = mult_data * resamp
     return res
 
 
@@ -247,14 +233,28 @@ def get_affine(data):
     py = lat[0].values
     return Affine(dx, 0, px, 0, dy, py)
 
-#
-# class PopulationType(Enum):
-#     count = 'population_count_2000-2020.nc'
-#     density = 'population_density_2000-2020.nc'
-#
+
+def get_population_mask():
+    # TODO could try keeping this in the population netcdf?
+    file_path = POP_DATA_SRC / 'water_mask_eightres.tif'
+    with rasterio.open(str(file_path)) as pop:
+        pop_mask = pop.read(1)
+    width = pop_mask.shape[1]
+
+    pop_mask = np.roll(pop_mask, -width//2, axis=1)
+    # TODO should this be as int or should we set 0 to nan
+    pop_mask[pop_mask == 0] = np.nan
+    return pop_mask
+
+
+
+class PopulationType(Enum):
+    count = 'population_count_2000-2020.nc'
+    density = 'population_density_2000-2020.nc'
+
 
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file='population_count_2000-2020.nc', overlay_data=None, overlay_key='values'):
+    def __init__(self, population_file='population_count_2000-2020.nc', mask=True):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
@@ -262,23 +262,60 @@ class PopulationProjector(AbstractContextManager):
 
         self.population_affine = get_affine(self.data)
 
-        self.overlay = None
-
-        # TODO should i rasterize an input here, or just pre-process it for each indicator
-        if overlay_data:
-            self.overlay = self.rasterize_data(overlay_data, overlay_key)
+        if mask:
+            self.mask = get_population_mask()
+            self.mask.shape = (*self.mask.shape, 1)
+        else:
+            self.mask = False
 
 
     def rasterize_data(self, table, key):
+        """
+        Rasterize a geopandas table with a geometry column
+        onto the population grid, setting the shape regions to the
+        value in the column name 'key'
+        
+        Returns a raster that should match the population bits,
+        on grid 0 to 360.
+        
+        Note that need some fiddling for this, not certain how the
+        projection is working but seems to want to assume -180 to 180 input/output
+        so have to roll to get ERA compatible layout
+        
+        Args:
+            table: GeoPandas table
+            key: Table column name
+
+        Returns:
+
+        """
+        # NOTE: it seems that rasterize wants -180 to 180 :/
+        # Figure out the transform from the geopandas to the raster
+        # px = -180
+        # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
+        affine = self.population_affine
         raster = features.rasterize(
             ((r.geometry, r[key]) for _, r in table.iterrows()),
             out_shape=self.data.population.shape[:2],
-            transform=self.population_affine
+            transform=affine
         )
+        # Roll the result to fix affine oddity
+        raster = np.roll(raster, -raster.shape[1] // 2, axis=1)
+
         return raster
 
+
     def project(self, year, param: xr.DataArray):
-        # TODO: might need to modify for when you also want to project demographic data
+        """
+        Project param onto the population grid and multiply by population values
+        
+        Args:
+            year: 
+            param: 
+
+        Returns:
+
+        """
 
         lon = param.longitude if 'longitude' in param.coords else param.lon
         lat = param.latitude if 'latitude' in param.coords else param.lat
@@ -289,14 +326,24 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        projected = project_to_population(year, param, self.data, input_affine, self.population_affine, self.crs)
-        if self.overlay:
-            projected = projected * self.overlay
+        pop_year = self.data.population.sel(time='{year}'.format(year=year))
 
+        projected = project_to_population(param, pop_year, input_affine, self.population_affine, self.crs)
+        if self.mask is not False:
+            projected = projected * self.mask
         return projected
 
-    def project_intermediate(self, year, param: xr.DataArray):
-        # TODO: might need to modify for when you also want to project demographic data
+    def project_param(self, year, param: xr.DataArray):
+        """
+        Project parameter to the population grid, but don't multiply
+        
+        Args:
+            year: 
+            param: 
+
+        Returns:
+
+        """
 
         lon = param.longitude if 'longitude' in param.coords else param.lon
         lat = param.latitude if 'latitude' in param.coords else param.lat
@@ -312,6 +359,19 @@ class PopulationProjector(AbstractContextManager):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data.close()
+
+
+# REZ_FIX = 'quartres'
+REZ_FIX = 'eightres'
+
+POP_TYPE = 'density'
+_POPULATION_PATH_TEMPLATE = 'population_{year}_{resolution}.tif'
+# _POP_SRC = POP_DATA_SRC / 'nasa_grid' / 'count'
+_POP_SRC = POP_DATA_SRC / 'nasa_grid' / POP_TYPE
+# _POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
+# _POP_ORIGINAL_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
+_POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals-{year}'
+_POP_ORIGINAL_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals_{year}'
 
 
 if __name__ == '__main__':
