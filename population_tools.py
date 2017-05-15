@@ -114,6 +114,7 @@ def interp_to_netcdf():
                  )
     print('Done')
 
+
 @jit
 def create_timeseries(height, interval, width):
     years = [2000, 2005, 2010, 2015]
@@ -182,7 +183,8 @@ def do_derez(how='sum'):
 
             executor.submit(derez_population, population_file, year, 3, how)
 
-@jit
+
+@jit(cache=True)
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon, out_time):
     reproj = np.empty(shape=shape[0:2])
     reproject(
@@ -207,7 +209,7 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon,
 
 
 @jit
-def project_to_population(src_data, mult_data, src_affine, out_affine, crs):
+def project_and_multiply(src_data, mult_data, src_affine, out_affine, crs):
 
     resamp = reproject_to(mult_data.shape, src_data,
                           src_affine, out_affine, crs,
@@ -234,7 +236,7 @@ def get_affine(data):
     return Affine(dx, 0, px, 0, dy, py)
 
 
-def get_population_mask():
+def get_water_mask():
     # TODO could try keeping this in the population netcdf?
     file_path = POP_DATA_SRC / 'water_mask_eightres.tif'
     with rasterio.open(str(file_path)) as pop:
@@ -254,19 +256,39 @@ class PopulationType(Enum):
 
 
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file='population_count_2000-2020.nc', mask=True):
+    def __init__(self, population_file='population_count_2000-2020.nc', mask_empty=True):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
-        self.data = xr.open_dataset(str(pop_file))
+        self.data: xr.Dataset = xr.open_dataset(str(pop_file), chunks={'time': 2})
 
-        self.population_affine = get_affine(self.data)
+        self.affine = get_affine(self.data)
 
-        if mask:
-            self.mask = get_population_mask()
-            self.mask.shape = (*self.mask.shape, 1)
-        else:
-            self.mask = False
+        self.water_mask = get_water_mask()
+        self.water_mask.shape = (*self.water_mask.shape, 1)
+        self.mask_empty = mask_empty
+
+        if self.mask_empty:
+            self.data = self.data_empty_masked
+
+    @property
+    def data_water_masked(self) -> xr.Dataset:
+        """
+        Returns:
+            Population with areas of water and ice replaced with NaN
+        """
+
+        return self.data * self.water_mask
+
+
+    @property
+    def data_empty_masked(self) -> xr.Dataset:
+        """
+        Returns:
+            Population with areas of water and ice replaced with NaN
+        """
+        return self.water_mask * self.data.where(self.data.population > 1e-08)
+
 
 
     def rasterize_data(self, table, key):
@@ -293,7 +315,7 @@ class PopulationProjector(AbstractContextManager):
         # Figure out the transform from the geopandas to the raster
         # px = -180
         # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
-        affine = self.population_affine
+        affine = self.affine
         raster = features.rasterize(
             ((r.geometry, r[key]) for _, r in table.iterrows()),
             out_shape=self.data.population.shape[:2],
@@ -326,11 +348,21 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        pop_year = self.data.population.sel(time='{year}'.format(year=year))
 
-        projected = project_to_population(param, pop_year, input_affine, self.population_affine, self.crs)
-        if self.mask is not False:
-            projected = projected * self.mask
+        if self.mask_empty:
+            # projected = projected * self.water_mask
+            pop_year = self.data_empty_masked.population.sel(time=f'{year}')
+        else:
+            pop_year = self.data.population.sel(time=f'{year}')
+
+        # projected = project_and_multiply(param, pop_year, input_affine, self.population_affine, self.crs)
+
+        projected = reproject_to(pop_year.shape, param,
+                                 input_affine, self.affine, self.crs,
+                                 pop_year.latitude, pop_year.longitude, pop_year.time)
+
+        projected = pop_year * projected
+
         return projected
 
     def project_param(self, year, param: xr.DataArray):
@@ -354,19 +386,17 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        return reproject_to(self.data.population.shape, param, input_affine, self.population_affine, self.crs,
+        return reproject_to(self.data.population.shape, param, input_affine, self.affine, self.crs,
                             self.data.latitude, self.data.longitude, [year])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data.close()
 
 
-# REZ_FIX = 'quartres'
 REZ_FIX = 'eightres'
 
 POP_TYPE = 'density'
 _POPULATION_PATH_TEMPLATE = 'population_{year}_{resolution}.tif'
-# _POP_SRC = POP_DATA_SRC / 'nasa_grid' / 'count'
 _POP_SRC = POP_DATA_SRC / 'nasa_grid' / POP_TYPE
 # _POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
 # _POP_ORIGINAL_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
