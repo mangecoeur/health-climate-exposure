@@ -27,6 +27,7 @@ dependencies:
 - numba=0.32.0=np112py36_0
 - numpy=1.12.1=py36_0
 - scipy=0.19.0=np112py36_0
+- tqdm
 - pip:
   - ecmwf-api-client==1.4.1
 prefix: /Users/jonathanchambers/miniconda3/envs/lancet
