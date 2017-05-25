@@ -53,6 +53,8 @@ def retreive_2000_2016_monthly_mean():
 
 def retreive_climatology():
     # Mean temperature
+    server = ECMWFDataServer()
+
     server.retrieve({
         "dataset": "interim",
         "class": "ei",
