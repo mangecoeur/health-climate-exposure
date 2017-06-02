@@ -185,7 +185,7 @@ def do_derez(how='sum'):
 
 
 @jit(cache=True)
-def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon, out_time):
+def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon):
     reproj = np.empty(shape=shape[0:2])
     reproject(
         src_data.values, reproj,
@@ -213,7 +213,7 @@ def project_and_multiply(src_data, mult_data, src_affine, out_affine, crs):
 
     resamp = reproject_to(mult_data.shape, src_data,
                           src_affine, out_affine, crs,
-                          mult_data.latitude, mult_data.longitude, mult_data.time)
+                          mult_data.latitude, mult_data.longitude)
     res = mult_data * resamp
     return res
 
@@ -260,8 +260,10 @@ class PopulationProjector(AbstractContextManager):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
-        self.data: xr.Dataset = xr.open_dataset(str(pop_file), chunks={'time': 2})
-
+        # self.data: xr.Dataset = xr.open_dataset(str(pop_file), chunks={'time': 2})
+        self.data: xr.Dataset = xr.open_dataarray(str(pop_file), chunks={'year': 2})
+        # self.data['time'] =  self.data['time.year']
+        # self.data =  self.data.rename({'time': 'year'})
         self.affine = get_affine(self.data)
 
         self.water_mask = get_water_mask()
@@ -287,7 +289,7 @@ class PopulationProjector(AbstractContextManager):
         Returns:
             Population with areas of water and ice replaced with NaN
         """
-        return self.water_mask * self.data.where(self.data.population > 1e-08)
+        return self.water_mask * self.data.where(self.data > 1e-08)
 
 
 
@@ -318,7 +320,7 @@ class PopulationProjector(AbstractContextManager):
         affine = self.affine
         raster = features.rasterize(
             ((r.geometry, r[key]) for _, r in table.iterrows()),
-            out_shape=self.data.population.shape[:2],
+            out_shape=self.data.shape[:2],
             transform=affine
         )
         # Roll the result to fix affine oddity
@@ -351,15 +353,15 @@ class PopulationProjector(AbstractContextManager):
 
         if self.mask_empty:
             # projected = projected * self.water_mask
-            pop_year = self.data_empty_masked.population.sel(time=f'{year}')
+            pop_year = self.data_empty_masked.sel(year=year)
         else:
-            pop_year = self.data.population.sel(time=f'{year}')
+            pop_year = self.data.sel(year=year)
 
         # projected = project_and_multiply(param, pop_year, input_affine, self.population_affine, self.crs)
 
         projected = reproject_to(pop_year.shape, param,
                                  input_affine, self.affine, self.crs,
-                                 pop_year.latitude, pop_year.longitude, pop_year.time)
+                                 pop_year.latitude, pop_year.longitude)
 
         projected = pop_year * projected
 
@@ -386,7 +388,7 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        return reproject_to(self.data.population.shape, param, input_affine, self.affine, self.crs,
+        return reproject_to(self.data.shape, param, input_affine, self.affine, self.crs,
                             self.data.latitude, self.data.longitude, [year])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
