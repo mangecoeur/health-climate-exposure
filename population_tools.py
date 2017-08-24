@@ -51,6 +51,7 @@ def get_era_compat_crs_affine():
     era_compat_affine = Affine(dx, 0, 0, 0, dy, py)
     return common_crs, era_compat_affine
 
+
 def lin_interp(year_one, interval):
     # Grids are at 5 year intervals
     # interval = 5
@@ -58,8 +59,8 @@ def lin_interp(year_one, interval):
 
     population_file_path_one = _POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year_one,
                                                                            resolution=REZ_FIX)
-    population_file_path_two =_POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year_two,
-                                                                          resolution=REZ_FIX)
+    population_file_path_two = _POP_SRC / _POPULATION_PATH_TEMPLATE.format(year=year_two,
+                                                                           resolution=REZ_FIX)
     # population_file_path_one = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_one}_{REZ_FIX}.tif'
     # population_file_path_two = POP_DATA_SRC / 'nasa_grid' / 'count' / f'population_{year_two}_{REZ_FIX}.tif'
 
@@ -71,7 +72,6 @@ def lin_interp(year_one, interval):
 
     gradient = (population_two - population_one) / interval
     return population_one, gradient
-
 
 
 def interp_to_netcdf():
@@ -95,7 +95,7 @@ def interp_to_netcdf():
     dx, _, px, _, dy, py, _, _, _ = era_compat_affine
     pop_x = pop_x * dx + px
     pop_y = pop_y * dy + py
-    out = np.roll(out, -width//2, axis=1)
+    out = np.roll(out, -width // 2, axis=1)
 
     # Create dataset
     ds = xr.Dataset({'population': (['latitude', 'longitude', 'time'], out)},
@@ -187,6 +187,7 @@ def do_derez(how='sum'):
 @jit(cache=True)
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon):
     reproj = np.empty(shape=shape[0:2])
+    # TODO do you really need rasterio? could just use scipy interp.
     reproject(
         src_data.values, reproj,
         src_transform=src_affine,
@@ -198,24 +199,14 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon)
     # reproj.shape = (shape[0], shape[1], 1)
     # Wrap as DataArray to make sure the coordinates line up
     reproj = xr.DataArray(reproj,
-                             coords={'latitude': out_lat,
-                                     'longitude': out_lon,
-                                     # 'time': out_time
-                                     },
-                             dims=['latitude', 'longitude',
-                                   # 'time'
-                                   ])
+                          coords={'latitude': out_lat,
+                                  'longitude': out_lon,
+                                  # 'time': out_time
+                                  },
+                          dims=['latitude', 'longitude',
+                                # 'time'
+                                ])
     return reproj
-
-
-@jit
-def project_and_multiply(src_data, mult_data, src_affine, out_affine, crs):
-
-    resamp = reproject_to(mult_data.shape, src_data,
-                          src_affine, out_affine, crs,
-                          mult_data.latitude, mult_data.longitude)
-    res = mult_data * resamp
-    return res
 
 
 def get_affine(data):
@@ -236,38 +227,70 @@ def get_affine(data):
     return Affine(dx, 0, px, 0, dy, py)
 
 
-def get_water_mask():
-    # TODO could try keeping this in the population netcdf?
+def get_water_mask(target):
+    """
+    Get the water mask on 0-360 lon range
+
+    Args:
+        target:
+
+    Returns:
+
+    """
     file_path = POP_DATA_SRC / 'water_mask_eightres.tif'
+
     with rasterio.open(str(file_path)) as pop:
         pop_mask = pop.read(1)
-    width = pop_mask.shape[1]
 
-    pop_mask = np.roll(pop_mask, -width//2, axis=1)
+
+        new_mask = np.empty(shape=(len(target.latitude),
+                                   len(target.longitude)))
+
+        new_aff = get_affine(target)
+        # Override xform to ensure -180 to 180 range
+        transform = Affine(new_aff.a, 0, -180, 0, new_aff.e, new_aff.f)
+        reproject(
+            pop_mask, new_mask,
+            src_transform=pop.transform,
+            dst_transform=transform,
+            src_crs=pop.crs,
+            dst_crs=pop.crs,
+            resample=Resampling.bilinear)
+
+    # Roll to fix -180 to 180 vs 0 to 360 convention
+
+    width = new_mask.shape[1]
+    new_mask = np.roll(new_mask, -width // 2, axis=1)
     # TODO should this be as int or should we set 0 to nan
-    pop_mask[pop_mask == 0] = np.nan
-    return pop_mask
-
+    new_mask[new_mask == 0] = np.nan
+    return new_mask
 
 
 class PopulationType(Enum):
-    count = 'population_count_2000-2020.nc'
-    density = 'population_density_2000-2020.nc'
+    count = POP_DATA_SRC / 'population_count_2000-2020.nc'
+    density = POP_DATA_SRC / 'population_density_2000-2020.nc'
+
+
+DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020.nc'
 
 
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file='population_count_2000-2020.nc', mask_empty=True):
+    def __init__(self, population_file=DEFAULT_FILE, mask_empty=True):
         self.crs = CRS({'init': 'epsg:4326'})
 
         pop_file = POP_DATA_SRC / population_file
         # self.data: xr.Dataset = xr.open_dataset(str(pop_file), chunks={'time': 2})
         self.data: xr.Dataset = xr.open_dataarray(str(pop_file), chunks={'year': 2})
+
+        if 'lon' in self.data.dims:
+            self.data = self.data.rename({'lon': 'longitude', 'lat': 'latitude'})
+
         # self.data['time'] =  self.data['time.year']
         # self.data =  self.data.rename({'time': 'year'})
         self.affine = get_affine(self.data)
 
-        self.water_mask = get_water_mask()
-        self.water_mask.shape = (*self.water_mask.shape, 1)
+        self.water_mask = get_water_mask(self.data)
+        # self.water_mask.shape = (*self.water_mask.shape, 1)
         self.mask_empty = mask_empty
 
         if self.mask_empty:
@@ -282,16 +305,16 @@ class PopulationProjector(AbstractContextManager):
 
         return self.data * self.water_mask
 
-
     @property
     def data_empty_masked(self) -> xr.Dataset:
         """
         Returns:
             Population with areas of water and ice replaced with NaN
         """
-        return self.water_mask * self.data.where(self.data > 1e-08)
-
-
+        da = xr.DataArray(self.water_mask, coords=[self.data.latitude, self.data.longitude],
+                          dims=['latitude', 'longitude'],
+                          name='water_mask')
+        return da * self.data.where(self.data > 1e-08)
 
     def rasterize_data(self, table, key):
         """
@@ -315,7 +338,6 @@ class PopulationProjector(AbstractContextManager):
         """
         # NOTE: it seems that rasterize wants -180 to 180 :/
         # Figure out the transform from the geopandas to the raster
-        # px = -180
         # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
         affine = self.affine
         raster = features.rasterize(
@@ -327,7 +349,6 @@ class PopulationProjector(AbstractContextManager):
         raster = np.roll(raster, -raster.shape[1] // 2, axis=1)
 
         return raster
-
 
     def project(self, year, param: xr.DataArray):
         """
@@ -343,7 +364,7 @@ class PopulationProjector(AbstractContextManager):
 
         lon = param.longitude if 'longitude' in param.coords else param.lon
         lat = param.latitude if 'latitude' in param.coords else param.lat
-        dx = (lon[1] -lon[0]).values
+        dx = (lon[1] - lon[0]).values
         px = lon[0].values
 
         dy = (lat[1] - lat[0]).values
@@ -356,8 +377,6 @@ class PopulationProjector(AbstractContextManager):
             pop_year = self.data_empty_masked.sel(year=year)
         else:
             pop_year = self.data.sel(year=year)
-
-        # projected = project_and_multiply(param, pop_year, input_affine, self.population_affine, self.crs)
 
         projected = reproject_to(pop_year.shape, param,
                                  input_affine, self.affine, self.crs,
@@ -381,7 +400,7 @@ class PopulationProjector(AbstractContextManager):
 
         lon = param.longitude if 'longitude' in param.coords else param.lon
         lat = param.latitude if 'latitude' in param.coords else param.lat
-        dx = (lon[1] -lon[0]).values
+        dx = (lon[1] - lon[0]).values
         px = lon[0].values
 
         dy = (lat[1] - lat[0]).values
@@ -404,7 +423,6 @@ _POP_SRC = POP_DATA_SRC / 'nasa_grid' / POP_TYPE
 # _POP_ORIGINAL_TMPL = 'gpw-v4-population-count-adjusted-to-2015-unwpp-country-totals-{year}'
 _POP_ORIGINAL_FOLDER_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals-{year}'
 _POP_ORIGINAL_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-totals_{year}'
-
 
 if __name__ == '__main__':
     do_derez(how='mean')
@@ -444,4 +462,3 @@ def interp_to_gtiff(intercept, gradient, interval, year):
         for i in range(interval):
             pop_for_year = intercept + i * gradient
             new_dataset.write(pop_for_year, i + 1)  # gtiff bands numbered from 1
-
