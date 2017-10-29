@@ -56,3 +56,6 @@ docs/_build/
 # PyBuilder
 target/
 .idea
+country_briefs/.DS_Store
+*.zip
+.DS_Store

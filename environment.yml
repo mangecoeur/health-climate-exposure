@@ -3,32 +3,31 @@ channels: !!python/tuple
 - conda-forge
 - defaults
 dependencies:
-- conda-forge::affine=2.0.0.post1=py36_0
-- conda-forge::bokeh=0.12.5=py36_0
-- conda-forge::cartopy=0.15.1=np112py36_1
-- conda-forge::dask=0.14.1=py36_0
-- conda-forge::descartes=1.1.0=py36_0
-- conda-forge::distributed=1.16.1=py36_0
-- conda-forge::fiona=1.7.5=np112py36_0
-- conda-forge::h5py=2.7.0=np112py36_0
-- conda-forge::ipykernel=4.6.1=py36_0
-- conda-forge::ipython=5.3.0=py36_0
-- conda-forge::joblib=0.11=py36_0_1
-- conda-forge::matplotlib
-- conda-forge::netcdf4=1.2.7=np112py36_0
-- conda-forge::pandas=0.19.2=np112py36_1
-- conda-forge::psycopg2=2.6.2=py36_1
-- conda-forge::python=3.6.1=0
-- conda-forge::rasterio=1.0a8=np112py36_0
-- conda-forge::rtree=0.8.3=py36_0
-- conda-forge::shapely=1.5.17=np112py36_2
-- conda-forge::sqlalchemy=1.1.5=py36_0
-- conda-forge::xarray=0.9.5=py36_0
-- numba=0.32.0=np112py36_0
-- numpy=1.12.1=py36_0
-- scipy=0.19.0=np112py36_0
+- python=3.6
+- affine
+- bokeh
+- cartopy
+- dask
+- descartes
+- distributed
+- fiona
+- h5py
+- ipykernel
+- ipython
+- joblib
+- matplotlib
+- netcdf4
+- pandas
+- psycopg2
+- rasterio
+- rtree
+- shapely
+- sqlalchemy
+- xarray
+- numba
+- numpy
+- scipy
 - tqdm
 - pip:
-  - ecmwf-api-client==1.4.1
+  - ecmwf-api-client
 prefix: /Users/jonathanchambers/miniconda3/envs/lancet
-
