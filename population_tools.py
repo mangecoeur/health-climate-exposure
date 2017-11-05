@@ -320,7 +320,7 @@ class PopulationProjector(AbstractContextManager):
             water_mask_path = POP_DATA_SRC / 'water_mask_sixteenres.tif'
         else:
             water_mask_path = POP_DATA_SRC / water_mask_file
-            
+
         self.water_mask = get_water_mask(self.data, water_mask_path)
         # self.water_mask.shape = (*self.water_mask.shape, 1)
         self.mask_empty = mask_empty
