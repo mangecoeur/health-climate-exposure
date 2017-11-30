@@ -288,12 +288,12 @@ def get_water_mask(target, file_path):
 
 
 class PopulationType(Enum):
-    count = 'population_count_2000-2020.nc'
-    density = 'population_density_2000-2020.nc'
+    count = POP_DATA_SRC / 'population_count_2000-2020.nc'
+    density = POP_DATA_SRC / 'population_density_2000-2020.nc'
 
 
-# DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020.nc'
-DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020_highres.nc'
+DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020.nc'
+# DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020_highres.nc'
 
 
 
