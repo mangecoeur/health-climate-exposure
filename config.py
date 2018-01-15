@@ -6,7 +6,8 @@ POP_DATA_SRC = HUMANS_SRC / 'population'
 SHAPEFILES_SRC = DATA_SRC / 'GIS' / 'world'
 
 ERA_2015 = DATA_SRC / 'weather' / 'ecmwf' / 'ecmwf_era_interim_2014-2017_compress.nc'
-ERA_MONTHLY_FILE = DATA_SRC / 'weather' / 'ecmwf' / 'era_interim_monthly_means.nc'
+# ERA_MONTHLY_FILE = DATA_SRC / 'weather' / 'ecmwf' / 'era_interim_monthly_means.nc'
+ERA_MONTHLY_FILE = DATA_SRC / 'weather' / 'ecmwf' / 'monthly_means'
 
 CLIMATOLOGY_FILE = DATA_SRC / 'weather' / 'ecmwf' / 'era_climatology.nc'
 CLIMATOLOGY_FILE_RESAMP = DATA_SRC / 'weather' / 'ecmwf' / 'era_climatology_resamp.nc'
