@@ -152,12 +152,12 @@ def derez_population(population_file_path, year, n_iters=1, how='sum'):
         first = population[::2, :]
         second = population[1::2, :]
         if second.shape[0] < first.shape[0]:
-            # missing a row, need to 'wrap'- just double the values from 'first' as an appoximation
+            # missing a row, need to 'wrap'- just double the values from 'first' as an aproximation
             second = np.vstack((second, first[-1, :]))
         population = first + second
         # Sum every other column
         if second.shape[1] < first.shape[1]:
-            # missing a row, need to 'wrap'- just double the values from 'first' as an appoximation
+            # missing a row, need to 'wrap'- just double the values from 'first' as an aproximation
             second = np.hstack((second, first[:, -1]))
         first = population[:, ::2]
         second = population[:, 1::2]
@@ -200,8 +200,6 @@ def do_derez(how='sum'):
             population_file = (_POP_SRC /
                                _POP_ORIGINAL_FOLDER_TMPL.format(type=POP_TYPE, year=year) /
                                (_POP_ORIGINAL_TMPL.format(type=POP_TYPE, year=year) + '.tif'))
-
-        # derez_population(population_file, year, 4, how)
 
             executor.submit(derez_population, population_file, year, 4, how)
 
@@ -447,6 +445,27 @@ class PopulationProjector(AbstractContextManager):
         self.data.close()
 
 
+def project_to_population(anom_data, demographics=None, norm=False, start_year=2000, end_year=2017):
+    with PopulationProjector('population_count_2000-2020_highres.nc',
+                                              'water_mask_eightres.tif') as pop:
+        if demographics:
+            pop_sel = (pop.data * demographics).compute()
+        else:
+            pop_sel = pop.data
+        pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
+
+        def do(year):
+            proj = pop.project_param(anom_data.sel(year=year))
+            proj = proj * pop_sel.sel(year=year)
+            if norm:
+                proj = proj / pop_sum.sel(year=year)
+            return proj.compute()
+
+        exposures: xr.DataArray = xr.concat((do(year) for year in range(start_year, end_year + 1)), dim='year')
+        exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
+                                     skipna=True).compute()
+        return exposures_ts
+
 # REZ_FIX = 'eightres'
 REZ_FIX = 'sixteenres'
 
@@ -463,37 +482,3 @@ if __name__ == '__main__':
     # do_derez(how='sum')
     interp_to_netcdf()
 
-
-# --------------------
-# Deprioritised work
-# --------------------
-
-def interp_to_gtiff(intercept, gradient, interval, year):
-    """
-    NOTE: preferred to do this to netcdf.
-    
-    Do the interpolation directly into the file to save on memory.
-    
-    Args:
-        intercept: 
-        gradient: 
-        interval: 
-
-    Returns:
-
-    """
-    common_crs, common_trns = get_crs_and_affine()
-
-    with rasterio.open(str(POP_DATA_SRC / f'population_interp_{year}_{year+interval}.tif'),
-                       'w',
-                       driver='GTiff',
-                       height=intercept.shape[0],
-                       width=intercept.shape[1],
-                       count=interval,
-                       dtype=intercept.dtype,
-                       crs=common_crs,
-                       transform=common_trns,
-                       compress='lzw') as new_dataset:
-        for i in range(interval):
-            pop_for_year = intercept + i * gradient
-            new_dataset.write(pop_for_year, i + 1)  # gtiff bands numbered from 1

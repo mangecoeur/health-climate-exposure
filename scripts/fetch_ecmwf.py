@@ -29,7 +29,8 @@ def fetch_monthly_mean_temperature(out_folder, start=1980, end=2018):
             "target": out_file,
         })
 
-def retreive_climatology():
+
+def fetch_climatology(out_file):
     # Mean temperature
     server = ECMWFDataServer()
 
@@ -43,29 +44,10 @@ def retreive_climatology():
         "time": "00:00:00/06:00:00/12:00:00/18:00:00",
         "param": "2T",
         "date": "1989-01-01/to/2005-01-01",
-        "target": "output1.grib",
+        "format": 'netcdf',
+        "target": out_file,
     })
 
-
-
-def fetch_summer_temperatures(out_folder, start=1980, end=2018):
-    """
-    Get the 6-hourly temperatures
-
-    Args:
-        start:
-        end:
-
-    Returns:
-
-    """
-
-    for year in range(start, end):
-        fetch_single_summer_year(year, out_folder)
-    # with ProcessPoolExecutor() as executor:
-    #     for year in range(start, end):
-    #         f= executor.submit(fetch_single_summer_year, year, out_folder)
-    #     executor.shutdown(wait=True)
 
 
 def fetch_single_summer_year(year, out_folder):
@@ -95,6 +77,23 @@ def fetch_single_summer_year(year, out_folder):
         "target": out_file,
     })
     return
+
+
+def fetch_summer_temperatures(out_folder, start=1980, end=2018):
+    """
+    Get the 6-hourly temperatures
+
+    Args:
+        start:
+        end:
+
+    Returns:
+
+    """
+
+    for year in range(start, end):
+        fetch_single_summer_year(year, out_folder)
+
 
 # TODO CLI interface
 if __name__ == '__main__':
