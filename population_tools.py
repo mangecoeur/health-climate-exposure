@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 import xarray as xr
+
 from affine import Affine
 from numba import jit
 from rasterio import features
@@ -86,24 +87,15 @@ def interp_to_netcdf():
     out = create_timeseries(height, interval, width)
 
     print('Init netcdf')
-    # Init the netcdf file
+
     pop_x = np.arange(0, width)
     pop_y = np.arange(0, height)
-
-    # dx, _, px, _, dy, py, _, _, _ = common_trns
 
     # change the coords so they match ERA lon from 0 to 360
     dx, _, px, _, dy, py, _, _, _ = era_compat_affine
     pop_x = pop_x * dx + px
     pop_y = pop_y * dy + py
     out = np.roll(out, -width // 2, axis=1)
-
-    # Create dataset
-    # ds = xr.Dataset({'population': (['latitude', 'longitude', 'time'], out)},
-    #                 coords={'longitude': pop_x,
-    #                         'latitude': pop_y,
-    #                         'time': pd.date_range('2000-01-01', periods=out.shape[2], freq='AS')
-    #                         })
 
     ds = xr.Dataset({'population': (['latitude', 'longitude', 'year'], out)},
                     coords={'longitude': pop_x,
@@ -285,14 +277,8 @@ def get_water_mask(target, file_path):
     return new_mask
 
 
-class PopulationType(Enum):
-    count = POP_DATA_SRC / 'population_count_2000-2020.nc'
-    density = POP_DATA_SRC / 'population_density_2000-2020.nc'
-
-
 DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020.nc'
 # DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020_highres.nc'
-
 
 
 class PopulationProjector(AbstractContextManager):
@@ -303,14 +289,11 @@ class PopulationProjector(AbstractContextManager):
 
         # TODO don't force add this config path....
         pop_file = POP_DATA_SRC / population_file
-        # self.data: xr.Dataset = xr.open_dataset(str(pop_file), chunks={'time': 2})
         self.data: xr.Dataset = xr.open_dataarray(str(pop_file), chunks={'year': 2})
 
         if 'lon' in self.data.dims:
             self.data = self.data.rename({'lon': 'longitude', 'lat': 'latitude'})
 
-        # self.data['time'] =  self.data['time.year']
-        # self.data =  self.data.rename({'time': 'year'})
         self.affine = get_affine(self.data)
 
         # water_mask_path = POP_DATA_SRC / 'water_mask_eightres.tif'
