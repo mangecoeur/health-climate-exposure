@@ -13,11 +13,11 @@ You will need to run the Jupter notebook service to work with the `.ipynb` noteb
 
 The key working can be found in the relevant notebooks:
 
-[Temperature change exposure ERA](https://github.com/mangecoeur/health-climate-exposure/blob/master/Temperature%20change%20exposure%20ERA.ipynb)
+[Temperature change exposure ERA](https://github.com/mangecoeur/health-climate-exposure/blob/master/1.1%20Temperature%20change%20exposure%20ERA.ipynb)
 
-[Heatwave exposure change](https://github.com/mangecoeur/health-climate-exposure/blob/master/Heatwave%20exposure%20change.ipynb)
+[Heatwave exposure change](https://github.com/mangecoeur/health-climate-exposure/blob/master/1.2%20Heatwave%20exposure%20change.ipynb)
 
-[Labour capacity change](https://github.com/mangecoeur/health-climate-exposure/blob/master/Labour%20capacity%20change.ipynb)
+[Labour capacity change](https://github.com/mangecoeur/health-climate-exposure/blob/master/1.3%20Labour%20capacity%20change.ipynb)
 
 
 ## Input data download
