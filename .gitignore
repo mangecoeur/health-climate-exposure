@@ -59,3 +59,5 @@ target/
 country_briefs/.DS_Store
 *.zip
 .DS_Store
+
+*.nc
