@@ -95,6 +95,31 @@ def fetch_summer_temperatures(out_folder, start=1980, end=2018):
         fetch_single_summer_year(year, out_folder)
 
 
+def fetch_precipitation_year(out_folder, year):
+    # TODO figure out the correct variable to choose for drought indicator
+    server = ECMWFDataServer()
+
+    rng = pd.date_range('{year}-01-01'.format(year=year),
+                        '{year}-12-31'.format(year=year), freq='M')
+    date_list = '/'.join((t.strftime('%Y-%m-%d') for t in rng))
+    out_file = str(out_folder / "{year}_precipitation.nc".format(year=year))
+
+
+    server.retrieve({
+        "class": "ei",
+        "dataset": "interim",
+        "date": date_list,
+        "expver": "1",
+        "grid": "0.75/0.75",
+        "levtype": "sfc",
+        "param": "228.128",
+        "step": "3/6/9/12",
+        "stream": "oper",
+        "time": "00:00:00/12:00:00",
+        "type": "fc",
+        "target": out_file,
+    })
+
 # TODO CLI interface
 if __name__ == '__main__':
     # summer_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'summer_temperature'
