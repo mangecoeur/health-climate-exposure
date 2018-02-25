@@ -1,6 +1,6 @@
 #!/usr/bin/env python
+import argparse
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 import pandas as pd
 from ecmwfapi import ECMWFDataServer
@@ -96,14 +96,24 @@ def fetch_summer_temperatures(out_folder, start=1980, end=2018):
 
 
 def fetch_precipitation_year(out_folder, year):
-    # TODO figure out the correct variable to choose for drought indicator
+    """
+    Fetch the monthly mean of daily accumulation
+    for total precipitation. Think of it as mean daily precipitation
+    for each month (to get total PPT for month, need to multiply by length of month)
+
+    Args:
+        out_folder:
+        year:
+
+    Returns:
+
+    """
     server = ECMWFDataServer()
 
     rng = pd.date_range('{year}-01-01'.format(year=year),
                         '{year}-12-31'.format(year=year), freq='M')
     date_list = '/'.join((t.strftime('%Y-%m-%d') for t in rng))
     out_file = str(out_folder / "{year}_precipitation.nc".format(year=year))
-
 
     server.retrieve({
         "class": "ei",
@@ -113,19 +123,34 @@ def fetch_precipitation_year(out_folder, year):
         "grid": "0.75/0.75",
         "levtype": "sfc",
         "param": "228.128",
-        "step": "3/6/9/12",
-        "stream": "oper",
-        "time": "00:00:00/12:00:00",
+        "step": "0-12",
+        "stream": "mdfa",
         "type": "fc",
         "target": out_file,
     })
 
-# TODO CLI interface
-if __name__ == '__main__':
-    # summer_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'summer_temperature'
-    summer_t_out = Path('./summer_temperature')
 
-    fetch_summer_temperatures(summer_t_out)
+def fetch_mean_precipitation(out_folder, start=1980, end=2018):
+    for year in range(start, end):
+        fetch_precipitation_year(year, out_folder)
+
+
+# TODO CLI interface
+def main():
+    parser = argparse.ArgumentParser(description='Download ECMWF data.')
+    parser.add_argument('out_folder', type=str)
+    parser.add_argument('--variable', choices=['summer_temperature', 'monthly_precipitation'])
+    parser.add_argument('--start', default=1980, type=int)
+    # TODO change default to current year
+    parser.add_argument('--end', default=2018, type=int)
+
+
+if __name__ == '__main__':
+    main()
+    # summer_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'summer_temperature'
+    # summer_t_out = Path('./summer_temperature')
+    #
+    # fetch_summer_temperatures(summer_t_out)
 
     # mean_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'monthly_means'
     # fetch_monthly_mean_temperature(mean_t_out)
