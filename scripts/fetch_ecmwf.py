@@ -6,9 +6,7 @@ import pandas as pd
 from ecmwfapi import ECMWFDataServer
 
 
-def fetch_monthly_mean_temperature(out_folder, start=1980, end=2018):
-    # TODO should retrive all months, not that big...
-    # TODO convert to get a file per year
+def fetch_monthly_mean_vars(out_folder, start=1980, end=2018):
     server = ECMWFDataServer()
     years = range(start, end)
     for year in years:
@@ -95,7 +93,7 @@ def fetch_summer_temperatures(out_folder, start=1980, end=2018):
         fetch_single_summer_year(year, out_folder)
 
 
-def fetch_precipitation_year(out_folder, year):
+def fetch_monthly_precipitation_year(out_folder, year):
     """
     Fetch the monthly mean of daily accumulation
     for total precipitation. Think of it as mean daily precipitation
@@ -130,22 +128,42 @@ def fetch_precipitation_year(out_folder, year):
     })
 
 
-def fetch_mean_precipitation(out_folder, start=1980, end=2018):
+def fetch_monthly_precipitation(out_folder, start=1980, end=2018):
     for year in range(start, end):
         fetch_precipitation_year(year, out_folder)
 
 
-# TODO CLI interface
+        
+FUNCTION_OPTS = {
+    'summer_temperature':fetch_summer_temperatures,
+    'monthly_precipitation': fetch_monthly_precipitation,
+    'monthly_means': fetch_monthly_mean_vars
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description='Download ECMWF data.')
     parser.add_argument('out_folder', type=str)
-    parser.add_argument('--variable', choices=['summer_temperature', 'monthly_precipitation'])
+    parser.add_argument('--variable', choices=list(FUNCTION_OPTS.keys()))
     parser.add_argument('--start', default=1980, type=int)
     # TODO change default to current year
     parser.add_argument('--end', default=2018, type=int)
+    params = parser.parse_args()
+    
+    if params.variable:
+        fun = FUNCTION_OPTS.get(params.variable)
+        if fun is None:
+            raise RuntimeError('No valid options passed to --variable parameter')
+    else:
+        raise RuntimeError(f'Must supply one of {list(FUNCTION_OPTS.keys())} to --variable parameter')
+    
+    out_folder = Path(params.out_folder)
+    fun(out_folder, start=params.start, end=params.end)
 
 
 if __name__ == '__main__':
+    #out_folder = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'monthly_means'
+    #fetch_monthly_mean_temperature(out_folder, start=2016, end=2018)
     main()
     # summer_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'summer_temperature'
     # summer_t_out = Path('./summer_temperature')
