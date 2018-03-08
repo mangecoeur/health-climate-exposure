@@ -58,7 +58,6 @@ def calculate_wbt(t_ref, relative_humidity, surface_pressure):
 
     Returns:
         Wet Bulb Temperature
-        TODO: is this in ˚C or K??
     """
 
     # Empirical formula for e_sat
