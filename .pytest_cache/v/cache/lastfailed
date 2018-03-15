@@ -1,4 +1,1 @@
-{
-  "drought_indices/test_indices.py::IndicesTestCase": true,
-  "drought_indices/test_indices.py::IndicesTestCase::test_spei_pearson_6month": true
-}
+{}
