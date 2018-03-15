@@ -4,9 +4,9 @@ to get population grid for every year. Do this with a simple
 linear interpolation.
 """
 from contextlib import AbstractContextManager
-from enum import Enum
 from pathlib import Path
 
+import datetime
 import numpy as np
 import pandas as pd
 import rasterio
@@ -18,6 +18,7 @@ from rasterio import features
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
+from tqdm import tnrange
 
 from config import POP_DATA_SRC
 
@@ -106,7 +107,8 @@ def interp_to_netcdf():
     print(ds)
 
     print('Saving')
-    ds.to_netcdf(str(POP_DATA_SRC / 'population_{type}_2000-2020.nc'.format(type=POP_TYPE)), format='NETCDF4',
+    ds.to_netcdf(str(POP_DATA_SRC / 'population_{type}_2000-2020_{rezfix}.nc'.format(type=POP_TYPE, rezfix=REZ_FIX)),
+                 format='NETCDF4',
                  encoding={'population': {
                      'zlib': True,
                  }}
@@ -193,7 +195,7 @@ def do_derez(how='sum'):
                                _POP_ORIGINAL_FOLDER_TMPL.format(type=POP_TYPE, year=year) /
                                (_POP_ORIGINAL_TMPL.format(type=POP_TYPE, year=year) + '.tif'))
 
-            executor.submit(derez_population, population_file, year, 4, how)
+            executor.submit(derez_population, population_file, year, N_ITERS_DEREZ, how)
 
 
 @jit(cache=True)
@@ -277,37 +279,35 @@ def get_water_mask(target, file_path):
     return new_mask
 
 
-DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020.nc'
-# DEFAULT_FILE = POP_DATA_SRC / 'population_count_2000-2020_highres.nc'
 
 
 class PopulationProjector(AbstractContextManager):
     def __init__(self, population_file,
-                 water_mask_file=None,
                  mask_empty=True):
         self.crs = CRS({'init': 'epsg:4326'})
 
-        # TODO don't force add this config path....
-        pop_file = POP_DATA_SRC / population_file
-        self.data: xr.Dataset = xr.open_dataarray(str(pop_file), chunks={'year': 2})
+        self.data: xr.Dataset = xr.open_dataset(str(population_file), chunks={'year': 2})
 
         if 'lon' in self.data.dims:
             self.data = self.data.rename({'lon': 'longitude', 'lat': 'latitude'})
 
-        self.affine = get_affine(self.data)
+        self.affine = get_affine(self.data.population)
 
+        # TODO cleanup. Water mask is now saved with the population
         # water_mask_path = POP_DATA_SRC / 'water_mask_eightres.tif'
-        if water_mask_file is None:
-            water_mask_path = POP_DATA_SRC / 'water_mask_sixteenres.tif'
-        else:
-            water_mask_path = POP_DATA_SRC / water_mask_file
+        # if water_mask_file is None:
+        #     water_mask_path = POP_DATA_SRC / 'water_mask_sixteenres.tif'
+        # else:
+        #     water_mask_path = POP_DATA_SRC / water_mask_file
 
-        self.water_mask = get_water_mask(self.data, water_mask_path)
+        # self.water_mask = get_water_mask(self.data, water_mask_path)
         # self.water_mask.shape = (*self.water_mask.shape, 1)
         self.mask_empty = mask_empty
 
         if self.mask_empty:
-            self.data = self.data_empty_masked
+            self.population = self.data_empty_masked
+        else:
+            self.population = self.data.popilation
 
     @property
     def data_water_masked(self) -> xr.Dataset:
@@ -316,7 +316,7 @@ class PopulationProjector(AbstractContextManager):
             Population with areas of water and ice replaced with NaN
         """
 
-        return self.data * self.water_mask
+        return self.population * self.data.water_mask
 
     @property
     def data_empty_masked(self) -> xr.Dataset:
@@ -324,10 +324,10 @@ class PopulationProjector(AbstractContextManager):
         Returns:
             Population with areas of water and ice replaced with NaN
         """
-        da = xr.DataArray(self.water_mask, coords=[self.data.latitude, self.data.longitude],
+        da = xr.DataArray(self.data.water_mask, coords=[self.data.latitude, self.data.longitude],
                           dims=['latitude', 'longitude'],
                           name='water_mask')
-        return da * self.data.where(self.data > 1e-08)
+        return da * self.data.population.where(self.data.population > 1e-08)
 
     def rasterize_data(self, table, key, affine=None):
         """
@@ -356,7 +356,7 @@ class PopulationProjector(AbstractContextManager):
 
         raster = features.rasterize(
             ((r.geometry, r[key]) for _, r in table.iterrows()),
-            out_shape=self.data.shape[:2],
+            out_shape=self.population.shape[:2],
             transform=affine
         )
         # Roll the result to fix affine oddity
@@ -390,7 +390,7 @@ class PopulationProjector(AbstractContextManager):
             # projected = projected * self.water_mask
             pop_year = self.data_empty_masked.sel(year=year)
         else:
-            pop_year = self.data.sel(year=year)
+            pop_year = self.population.sel(year=year)
 
         projected = reproject_to(pop_year.shape, param,
                                  input_affine, self.affine, self.crs,
@@ -421,20 +421,26 @@ class PopulationProjector(AbstractContextManager):
         py = lat[0].values
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
-        return reproject_to(self.data.shape, param, input_affine, self.affine, self.crs,
-                            self.data.latitude, self.data.longitude)
+        return reproject_to(self.population.shape, param, input_affine, self.affine, self.crs,
+                            self.population.latitude, self.population.longitude)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data.close()
 
+DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
 
-def project_to_population(anom_data, demographics=None, norm=False, start_year=2000, end_year=2017):
-    with PopulationProjector('population_count_2000-2020_highres.nc',
-                                              'water_mask_eightres.tif') as pop:
-        if demographics:
-            pop_sel = (pop.data * demographics).compute()
+# TODO adjust tqdm to work in notebook and non-notebook
+def project_to_population(anom_data, demographics=None, norm=False, start_year=2000, end_year=None,
+                          population_file=DEFAULT_POP_FILE):
+    if end_year is None:
+        # Default to current year
+        end_year = datetime.datetime.now().year
+
+    with PopulationProjector(population_file,) as pop:
+        if demographics is not None:
+            pop_sel = (pop.population * demographics).compute()
         else:
-            pop_sel = pop.data
+            pop_sel = pop.population
         pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
         def do(year):
@@ -444,13 +450,16 @@ def project_to_population(anom_data, demographics=None, norm=False, start_year=2
                 proj = proj / pop_sum.sel(year=year)
             return proj.compute()
 
-        exposures: xr.DataArray = xr.concat((do(year) for year in range(start_year, end_year + 1)), dim='year')
+
+        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
         exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
                                      skipna=True).compute()
         return exposures_ts
 
-# REZ_FIX = 'eightres'
-REZ_FIX = 'sixteenres'
+
+N_ITERS_DEREZ = 3  # equivalent to 1/8th original resolution
+REZ_FIX = 'eightres'
+# REZ_FIX = 'sixteenres'
 
 # POP_TYPE = 'density'
 POP_TYPE = 'count'

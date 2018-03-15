@@ -40,6 +40,7 @@ def fetch_precipitation_year(out_folder, year):
         "step": "0-12",
         "stream": "mdfa",
         "type": "fc",
+        "format": 'netcdf',
         "target": out_file,
     })
 

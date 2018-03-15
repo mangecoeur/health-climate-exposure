@@ -1,6 +1,7 @@
 from pathlib import Path
 
 DATA_SRC = Path('~/Data/').expanduser()
+WEATHER_SRC = DATA_SRC / 'weather'
 HUMANS_SRC = DATA_SRC / 'humans'
 POP_DATA_SRC = HUMANS_SRC / 'population'
 SHAPEFILES_SRC = DATA_SRC / 'GIS' / 'world'

@@ -47,7 +47,6 @@ def fetch_climatology(out_file):
     })
 
 
-
 def fetch_single_summer_year(year, out_folder):
     server = ECMWFDataServer()
     # Select only DJF/JJA months
@@ -93,7 +92,48 @@ def fetch_summer_temperatures(out_folder, start=1980, end=2018):
         fetch_single_summer_year(year, out_folder)
 
 
-def fetch_monthly_precipitation_year(out_folder, year):
+def fetch_single_year_temperatures(year, out_folder):
+    server = ECMWFDataServer()
+    rng = pd.date_range('{year}-01-01'.format(year=year),
+                        '{year}-12-31'.format(year=year), freq='D')
+
+    date_list = '/'.join((t.strftime('%Y-%m-%d') for t in rng))
+    out_file = str(out_folder / "{year}_temperature_2m.nc".format(year=year))
+    server.retrieve({
+        "class": "ei",
+        "dataset": "interim",
+        "date": date_list,
+        "expver": "1",
+        "grid": "0.75/0.75",
+        "levtype": "sfc",
+        "param": "167.128",
+        "step": "0",
+        "stream": "oper",
+        "time": "00:00:00/06:00:00/12:00:00/18:00:00",
+        "type": "an",
+        "format": 'netcdf',
+        "target": out_file,
+    })
+    return
+
+
+def fetch_temperatures(out_folder, start=1980, end=2018):
+    """
+    Get the 6-hourly 2m air temperatures
+
+    Args:
+        start:
+        end:
+
+    Returns:
+
+    """
+
+    for year in range(start, end):
+        fetch_single_year_temperatures(year, out_folder)
+
+
+def fetch_monthly_precipitation_year(year, out_folder):
     """
     Fetch the monthly mean of daily accumulation
     for total precipitation. Think of it as mean daily precipitation
@@ -124,18 +164,19 @@ def fetch_monthly_precipitation_year(out_folder, year):
         "step": "0-12",
         "stream": "mdfa",
         "type": "fc",
+        "format": 'netcdf',
         "target": out_file,
     })
 
 
 def fetch_monthly_precipitation(out_folder, start=1980, end=2018):
     for year in range(start, end):
-        fetch_precipitation_year(year, out_folder)
+        fetch_monthly_precipitation_year(year, out_folder)
 
 
-        
 FUNCTION_OPTS = {
-    'summer_temperature':fetch_summer_temperatures,
+    'temperature': fetch_temperatures,
+    'summer_temperature': fetch_summer_temperatures,
     'monthly_precipitation': fetch_monthly_precipitation,
     'monthly_means': fetch_monthly_mean_vars
 }
@@ -149,21 +190,21 @@ def main():
     # TODO change default to current year
     parser.add_argument('--end', default=2018, type=int)
     params = parser.parse_args()
-    
+
     if params.variable:
         fun = FUNCTION_OPTS.get(params.variable)
         if fun is None:
             raise RuntimeError('No valid options passed to --variable parameter')
     else:
-        raise RuntimeError(f'Must supply one of {list(FUNCTION_OPTS.keys())} to --variable parameter')
-    
+        raise RuntimeError('Must supply one of {} to --variable parameter'.format(list(FUNCTION_OPTS.keys())))
+
     out_folder = Path(params.out_folder)
     fun(out_folder, start=params.start, end=params.end)
 
 
 if __name__ == '__main__':
-    #out_folder = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'monthly_means'
-    #fetch_monthly_mean_temperature(out_folder, start=2016, end=2018)
+    # out_folder = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'monthly_means'
+    # fetch_monthly_mean_temperature(out_folder, start=2016, end=2018)
     main()
     # summer_t_out = Path('~/Data/').expanduser() / 'weather' / 'ecmwf' / 'summer_temperature'
     # summer_t_out = Path('./summer_temperature')
