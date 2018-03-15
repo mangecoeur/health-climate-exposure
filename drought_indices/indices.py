@@ -1,27 +1,28 @@
-from . import compute
 import logging
-from numba import float64, int64, jit
-import numpy as np
-from . import palmer
-import scipy.stats
-from . import thornthwaite
-import warnings
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+import numpy as np
+from numba import float64, int64, jit
+
+from . import compute
+from . import palmer
+from . import thornthwaite
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 # set up a basic, global logger
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s %(message)s',
                     datefmt='%Y-%m-%d  %H:%M:%S')
 logger = logging.getLogger(__name__)
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------------------------------------------
 # valid upper and lower bounds for indices that are fitted/transformed to a distribution (SPI and SPEI)  
 _FITTED_INDEX_VALID_MIN = -3.09
 _FITTED_INDEX_VALID_MAX = 3.09
+# -------------------------------------------------------------------------------------------------------------------------------------------
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
 @jit(float64[:](float64[:], int64))
-def spi_gamma(precips, 
+def spi_gamma(precips,
               months_scale):
     '''
     Computes monthly SPI using a fitting to the gamma distribution.
@@ -34,7 +35,7 @@ def spi_gamma(precips,
 
     # remember the original length of the array, in order to facilitate returning an array of the same size
     original_length = precips.size
-    
+
     # get a sliding sums array, with each month's value scaled by the specified number of months
     scaled_precips = compute.sum_to_scale(precips, months_scale)
 
@@ -43,13 +44,14 @@ def spi_gamma(precips,
 
     # clip values to within the valid range, reshape the array back to 1-D
     spi = np.clip(transformed_fitted_values, _FITTED_INDEX_VALID_MIN, _FITTED_INDEX_VALID_MAX).flatten()
-    
+
     # return the original size array 
     return spi[0:original_length]
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 @jit(float64[:](float64[:], int64, int64, int64, int64))
-def spi_pearson(precips, 
+def spi_pearson(precips,
                 months_scale,
                 data_start_year,
                 calibration_year_initial=1981,
@@ -68,30 +70,26 @@ def spi_pearson(precips,
 
     # remember the original length of the array, in order to facilitate returning an array of the same size
     original_length = precips.size
-    
+
     # get a sliding sums array, with each month's value scaled by the specified number of months
     scaled_precips = compute.sum_to_scale(precips, months_scale)
 
     # fit the scaled values to a Pearson Type III distribution and transform the values to corresponding normalized sigmas 
-    transformed_fitted_values = compute.transform_fitted_pearson(scaled_precips, 
+    transformed_fitted_values = compute.transform_fitted_pearson(scaled_precips,
                                                                  data_start_year,
                                                                  calibration_year_initial,
                                                                  calibration_year_final)
-        
+
     # clip values to within the valid range, reshape the array back to 1-D
     spi = np.clip(transformed_fitted_values, _FITTED_INDEX_VALID_MIN, _FITTED_INDEX_VALID_MAX).flatten()
-    
+
     # return the original size array 
     return spi[0:original_length]
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
-@jit(float64[:](int64, float64[:], float64[:], float64[:], int64, float64))
-def spei_gamma(months_scale,
-               precips_mm,
-               pet_mm=None,
-               temps_celsius=None,
-               data_start_year=None,
-               latitude_degrees=None):
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
+@jit(float64[:](float64[:], int64, float64[:], float64[:], int64, float64))
+def spei_gamma(precips_mm, months_scale, pet_mm=None, temps_celsius=None, data_start_year=None, latitude_degrees=None):
     '''
     Compute SPEI fitted to the gamma distribution.
     
@@ -123,16 +121,16 @@ def spei_gamma(months_scale,
     :return: an array of SPEI values
     :rtype: numpy.ndarray of type float, of the same size and shape as the input temperature and precipitation arrays
     '''
-    
+
     # validate the function's argument combinations
     if temps_celsius != None:
-        
+
         # since we have temperature then it's expected that we'll compute PET internally, so we shouldn't have PET as an input
         if pet_mm != None:
-            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both' 
+            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both'
             logger.error(message)
             raise ValueError(message)
-        
+
         # we'll need both the latitude and data start year in order to compute PET 
         elif (latitude_degrees == None) or (data_start_year == None):
             message = 'Missing arguments: since temperature is provided as an input then both latitude ' + \
@@ -150,20 +148,20 @@ def spei_gamma(months_scale,
         pet_mm = pet(temps_celsius, latitude_degrees, data_start_year)
 
     elif pet_mm != None:
-        
+
         # since we have PET as input we shouldn't have temperature as an input
         if temps_celsius != None:
-            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both.' 
+            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both.'
             logger.error(message)
             raise ValueError(message)
-        
+
         # make sure there's no confusion by not allowing a user to specify unnecessary parameters 
         elif (latitude_degrees != None) or (data_start_year != None):
             message = 'Extraneous arguments: since PET is provided as an input then both latitude ' + \
                       'and the data start year must not also be specified, and one or both is.'
             logger.error(message)
             raise ValueError(message)
-            
+
         # validate that the two input arrays are compatible
         elif precips_mm.size != pet_mm.size:
             message = 'Incompatible precipitation and PET arrays'
@@ -172,23 +170,24 @@ def spei_gamma(months_scale,
 
     # subtract the PET from precipitation, adding an offset to ensure that all values are positive
     p_minus_pet = (precips_mm - pet_mm) + 1000.0
-        
+
     # remember the original length of the input array, in order to facilitate returning an array of the same size
     original_length = precips_mm.size
-    
+
     # get a sliding sums array, with each month's value scaled by the specified number of months
     scaled_values = compute.sum_to_scale(p_minus_pet, months_scale)
 
     # fit the scaled values to a gamma distribution and transform the values to corresponding normalized sigmas 
     transformed_fitted_values = compute.transform_fitted_gamma(scaled_values)
-        
+
     # clip values to within the valid range, reshape the array back to 1-D
     spei = np.clip(transformed_fitted_values, _FITTED_INDEX_VALID_MIN, _FITTED_INDEX_VALID_MAX).flatten()
-    
+
     # return the original size array 
     return spei[0:original_length]
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 @jit(float64[:](int64, int64, float64[:], float64[:], float64[:], float64, int64, int64))
 def spei_pearson(months_scale,
                  data_start_year,
@@ -231,16 +230,16 @@ def spei_pearson(months_scale,
     :return: an array of SPEI values
     :rtype: numpy.ndarray of type float, of the same size and shape as the input temperature and precipitation arrays
     '''
-    
+
     # validate the function's argument combinations
     if temps_celsius != None:
-        
+
         # since we have temperature then it's expected that we'll compute PET internally, so we shouldn't have PET as an input
         if pet_mm != None:
-            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both' 
+            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both'
             logger.error(message)
             raise ValueError(message)
-        
+
         # we'll need the latitude in order to compute PET 
         elif latitude_degrees == None:
             message = 'Missing arguments: since temperature is provided as an input then both latitude ' + \
@@ -258,48 +257,49 @@ def spei_pearson(months_scale,
         pet_mm = pet(temps_celsius, latitude_degrees, data_start_year)
 
     elif pet_mm != None:
-        
+
         # since we have PET as input we shouldn't have temperature as an input
         if temps_celsius != None:
-            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both.' 
+            message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both.'
             logger.error(message)
             raise ValueError(message)
-        
+
         # make sure there's no confusion by not allowing a user to specify unnecessary parameters 
         elif latitude_degrees != None:
             message = 'Extraneous arguments: since PET is provided as an input then latitude ' + \
                       'must not also be specified.'
             logger.error(message)
             raise ValueError(message)
-            
+
         # validate that the two input arrays are compatible
         elif precips_mm.size != pet_mm.size:
             message = 'Incompatible precipitation and PET arrays'
             logger.error(message)
             raise ValueError(message)
-    
+
     # subtract the PET from precipitation, adding an offset to ensure that all values are positive
     p_minus_pet = (precips_mm - pet_mm) + 1000.0
-        
+
     # remember the original length of the input array, in order to facilitate returning an array of the same size
     original_length = precips_mm.size
-    
+
     # get a sliding sums array, with each month's value scaled by the specified number of months
     scaled_values = compute.sum_to_scale(p_minus_pet, months_scale)
 
     # fit the scaled values to a gamma distribution and transform the values to corresponding normalized sigmas 
-    transformed_fitted_values = compute.transform_fitted_pearson(scaled_values, 
+    transformed_fitted_values = compute.transform_fitted_pearson(scaled_values,
                                                                  data_start_year,
                                                                  calibration_year_initial,
                                                                  calibration_year_final)
-        
+
     # clip values to within the valid range, reshape the array back to 1-D
     spei = np.clip(transformed_fitted_values, _FITTED_INDEX_VALID_MIN, _FITTED_INDEX_VALID_MAX).flatten()
-    
+
     # return the original size array 
     return spei[0:original_length]
 
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 @jit
 def scpdsi(precip_time_series,
            pet_time_series,
@@ -320,15 +320,16 @@ def scpdsi(precip_time_series,
     :param calibration_end_year: final year of the calibration period 
     :return: four numpy arrays containing SCPDSI, PDSI, PHDI, and Z-Index values respectively 
     '''
-    
+
     return palmer.scpdsi(precip_time_series,
                          pet_time_series,
                          awc,
                          data_start_year,
                          calibration_start_year,
                          calibration_end_year)
-    
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 @jit
 def pdsi(precip_time_series,
          pet_time_series,
@@ -349,17 +350,18 @@ def pdsi(precip_time_series,
     :param calibration_end_year: final year of the calibration period 
     :return: three numpy arrays containing PDSI, PHDI, and Z-Index values respectively 
     '''
-    
+
     return palmer.pdsi(precip_time_series,
                        pet_time_series,
                        awc,
                        data_start_year,
                        calibration_start_year,
                        calibration_end_year)
-    
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 @jit(float64[:](float64[:], int64, int64, int64, int64))
-def percentage_of_normal(monthly_values, 
+def percentage_of_normal(monthly_values,
                          months_scale,
                          data_start_year,
                          calibration_start_year=1981,
@@ -380,31 +382,33 @@ def percentage_of_normal(monthly_values,
     :return: percent of normal precipitation values corresponding to the input monthly precipitation values array   
     :rtype: numpy.ndarray of type float
     '''
-    
+
     # do some basic validations to make sure we've been provided with sane calibration limits
     if data_start_year > calibration_start_year:
-        raise ValueError("Invalid start year arguments (data and/or calibration): calibration start year is before the data start year")
+        raise ValueError(
+            "Invalid start year arguments (data and/or calibration): calibration start year is before the data start year")
     elif ((calibration_end_year - calibration_start_year + 1) * 12) > monthly_values.size:
-        raise ValueError("Invalid calibration period specified: total calibration years exceeds the actual number of years of data")
-    
+        raise ValueError(
+            "Invalid calibration period specified: total calibration years exceeds the actual number of years of data")
+
     # get an array containing a sliding sum on the specified months scale -- i.e. if the months scale is 3 then
     # the first two elements will be np.NaN, since we need 3 elements to get a sum, and then from the third element
     # to the end the value will equal the sum of the corresponding month plus the values of the two previous months
     months_scale_sums = compute.sum_to_scale(monthly_values, months_scale)
-    
+
     # extract the months over which we'll compute the normal average for each calendar month
     calibration_years = calibration_end_year - calibration_start_year + 1
     calibration_start_index = (calibration_start_year - data_start_year) * 12
     calibration_end_index = calibration_start_index + (calibration_years * 12)
     calibration_period_sums = months_scale_sums[calibration_start_index:calibration_end_index]
-    
+
     # for each calendar month in the calibration period, get the average of the scale months sum 
     # for that calendar month (i.e. average all January sums, then all February sums, etc.) 
     calendar_month_averages = np.full((12,), np.nan)
     for i in range(12):
         calendar_month_averages[i] = np.nanmean(calibration_period_sums[i::12])
-    
-    #TODO replace the below loop with a vectorized implementation
+
+    # TODO replace the below loop with a vectorized implementation
     # for each month of the months_scale_sums array find its corresponding
     # percentage of the months scale average for its respective calendar month
     percentages_of_normal = np.full(months_scale_sums.shape, np.nan)
@@ -412,16 +416,15 @@ def percentage_of_normal(monthly_values,
 
         # make sure we don't have a zero divisor
         if calendar_month_averages[i % 12] > 0.0:
-            
             percentages_of_normal[i] = months_scale_sums[i] / calendar_month_averages[i % 12]
-    
+
     return percentages_of_normal
-    
-#-------------------------------------------------------------------------------------------------------------------------------------------
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 def pet(temperature_monthly_celsius,
         latitude_degrees,
         data_start_year):
-
     '''
     This function computes potential evapotranspiration (PET) using Thornthwaite's equation.
     
@@ -433,19 +436,20 @@ def pet(temperature_monthly_celsius,
     :rtype: 1-D numpy.ndarray of floats
     '''
     if not np.all(np.isnan(temperature_monthly_celsius)):
-        
+
         if not np.isnan(latitude_degrees) and (latitude_degrees < 90.0) and (latitude_degrees > -90.0):
-        
+
             # compute and return the PET values using Thornthwaite's equation
-            return thornthwaite.potential_evapotranspiration(temperature_monthly_celsius, latitude_degrees, data_start_year)
-        
+            return thornthwaite.potential_evapotranspiration(temperature_monthly_celsius, latitude_degrees,
+                                                             data_start_year)
+
         else:
-            message = 'Invalid latitude value: {0} (must be in degrees north, between -90.0 and 90.0 inclusive)'.format(latitude_degrees)
+            message = 'Invalid latitude value: {0} (must be in degrees north, between -90.0 and 90.0 inclusive)'.format(
+                latitude_degrees)
             logger.error(message)
             raise ValueError(message)
-        
+
     else:
-        
+
         # we started with all NaNs for the temperature, so just return the same
         return temperature_monthly_celsius
-        

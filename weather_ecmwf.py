@@ -28,7 +28,7 @@ def weather_mfdataset(root_path, rename=True):
     return data
 
 
-
+open_mfdataset = weather_mfdataset
 
 def any_weather_dataset(root_path, rename=True):
     data = xr.open_dataset(root_path)

@@ -430,8 +430,15 @@ class PopulationProjector(AbstractContextManager):
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
 
 # TODO adjust tqdm to work in notebook and non-notebook
+# TODO documentation
+# TODO simplify code, probably don't really need the context manager anymore.
 def project_to_population(anom_data, demographics=None, norm=False, start_year=2000, end_year=None,
                           population_file=DEFAULT_POP_FILE):
+    """
+    
+    Args:
+        anom_data: the data to project to the population grid
+    """
     if end_year is None:
         # Default to current year
         end_year = datetime.datetime.now().year
