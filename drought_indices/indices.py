@@ -188,15 +188,9 @@ def spei_gamma(precips_mm, months_scale, pet_mm=None, temps_celsius=None, data_s
 
 
 # -------------------------------------------------------------------------------------------------------------------------------------------
-@jit(float64[:](int64, int64, float64[:], float64[:], float64[:], float64, int64, int64))
-def spei_pearson(months_scale,
-                 data_start_year,
-                 precips_mm,
-                 pet_mm=None,
-                 temps_celsius=None,
-                 latitude_degrees=None,
-                 calibration_year_initial=1981,
-                 calibration_year_final=2010):
+@jit(float64[:](float64[:], int64, int64, float64[:], float64[:], float64, int64, int64))
+def spei_pearson(precips_mm, months_scale, data_start_year, pet_mm=None, temps_celsius=None, latitude_degrees=None,
+                 calibration_year_initial=1981, calibration_year_final=2010):
     '''
     Compute SPEI fitted to the Pearson Type III distribution.
     
@@ -425,16 +419,16 @@ def percentage_of_normal(monthly_values,
 def pet(temperature_monthly_celsius,
         latitude_degrees,
         data_start_year):
-    '''
+    """
     This function computes potential evapotranspiration (PET) using Thornthwaite's equation.
-    
+
     :param temperature_monthly_celsius: an array of monthly average temperature values, in degrees Celsius
-    :param latitude_degrees: the latitude of the location, in degrees north, must be within range [-90.0 ... 90.0] (inclusive), otherwise 
+    :param latitude_degrees: the latitude of the location, in degrees north, must be within range [-90.0 ... 90.0] (inclusive), otherwise
                              a ValueError is raised
     :param data_start_year: the initial year of the input dataset
     :return: an array of PET values, of the same size and shape as the input temperature values array, in millimeters/month
     :rtype: 1-D numpy.ndarray of floats
-    '''
+    """
     if not np.all(np.isnan(temperature_monthly_celsius)):
 
         if not np.isnan(latitude_degrees) and (latitude_degrees < 90.0) and (latitude_degrees > -90.0):

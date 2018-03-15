@@ -1,9 +1,9 @@
 import logging
-import math
-import numpy as np
-import scipy
 import unittest
-import utils
+
+import numpy as np
+
+from . import utils
 
 # disable logging messages
 logging.disable(logging.CRITICAL)

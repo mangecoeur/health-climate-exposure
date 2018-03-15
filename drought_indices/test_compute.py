@@ -1,4 +1,4 @@
-import compute
+from . import compute
 import logging
 import numpy as np
 import unittest

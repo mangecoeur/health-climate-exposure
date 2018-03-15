@@ -144,10 +144,8 @@ def process_latitude_spi_spei_pnp(lat_index):
                                                                            pet_mm=pet_time_series)
 
                 # compute SPEI/Pearson
-                spei_pearson_lat_slice[:, 0, lon_index] = indices.spei_pearson(scale_months,
-                                                                               data_start_year,
-                                                                               precip_time_series,
-                                                                               pet_mm=pet_time_series,
+                spei_pearson_lat_slice[:, 0, lon_index] = indices.spei_pearson(precip_time_series, scale_months,
+                                                                               data_start_year, pet_mm=pet_time_series,
                                                                                calibration_year_initial=calibration_start_year,
                                                                                calibration_year_final=calibration_end_year)
 

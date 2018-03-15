@@ -1,7 +1,9 @@
 import logging
-import numpy as np
-import thornthwaite
 import unittest
+
+import numpy as np
+
+from . import thornthwaite
 
 # disable logging messages
 logging.disable(logging.CRITICAL)
