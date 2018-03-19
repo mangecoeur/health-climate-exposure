@@ -11,14 +11,14 @@ from . import utils
 
 # -----------------------------------------------------------------------------------------------------------------------
 # set up a basic, global logger
-logging.basicConfig(level=logging.WARN,
-                    format='%(asctime)s %(levelname)s %(message)s',
-                    datefmt='%Y-%m-%d  %H:%M:%S')
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.WARN,
+#                     format='%(asctime)s %(levelname)s %(message)s',
+#                     datefmt='%Y-%m-%d  %H:%M:%S')
+# logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------------------------------------------------
 
 
-@jit
+@jit(nogil=True)
 def sum_to_scale(values,
                  scale):
     """
@@ -66,16 +66,16 @@ def _count_zeros_and_non_missings(values):
 
 # -----------------------------------------------------------------------------------------------------------------------
 def _estimate_pearson3_parameters(lmoments):
-    '''
-    Estimate parameters via L-moments for the Pearson Type III distribution, based on Fortran code written 
-    for inclusion in IBM Research Report RC20525, 'FORTRAN ROUTINES FOR USE WITH THE METHOD OF L-MOMENTS, VERSION 3' 
+    """
+    Estimate parameters via L-moments for the Pearson Type III distribution, based on Fortran code written
+    for inclusion in IBM Research Report RC20525, 'FORTRAN ROUTINES FOR USE WITH THE METHOD OF L-MOMENTS, VERSION 3'
     by J. R. M. Hosking, IBM Research Division, T. J. Watson Research Center, Yorktown Heights, NY 10598
     This is a Python translation of the original Fortran subroutine named 'pearson3'.
-    
+
     :param lmoments: 3-element, 1-D (flat) array containing the first three L-moments (lambda-1, lambda-2, and tau-3)
     :return the Pearson Type III parameters corresponding to the input L-moments
     :rtype: a 3-element, 1-D (flat) numpy array of floats
-    '''
+    """
 
     C1 = 0.2906
     C2 = 0.1882
@@ -91,7 +91,7 @@ def _estimate_pearson3_parameters(lmoments):
     # ensure the validity of the L-moments
     if (lmoments[1] <= 0) or (T3 >= 1):
         message = 'Unable to calculate Pearson Type III parameters due to invalid L-moments'
-        logger.error(message)
+        # logger.error(message)
         raise ValueError(message)
 
     # initialize the output array    
@@ -128,26 +128,25 @@ def _estimate_pearson3_parameters(lmoments):
 # -----------------------------------------------------------------------------------------------------------------------
 @jit
 def _estimate_lmoments(values):
-    '''
+    """
     Estimate sample L-moments, based on Fortran code written for inclusion in IBM Research Report RC20525,
     'FORTRAN ROUTINES FOR USE WITH THE METHOD OF L-MOMENTS, VERSION 3' by J. R. M. Hosking, IBM Research Division,
     T. J. Watson Research Center, Yorktown Heights, NY 10598, Version 3 August 1996.
-    
+
     Documentation on the original Fortran routines found here: https://rdrr.io/cran/nsRFA/man/HW.original.html
-    
-    This is a Python translation of the original Fortran subroutine SAMLMR() and which has been optimized 
-    for calculating only the first three L-moments. 
-    
+
+    This is a Python translation of the original Fortran subroutine SAMLMR() and which has been optimized
+    for calculating only the first three L-moments.
+
     :param values: 1-D (flattened) array of float values
     :return: an estimate of the first three sample L-moments
     :rtype: 1-D numpy array of floats (the first three sample L-moments corresponding to the input values)
-    '''
+    """
 
     # we need to have at least four values in order to make a sample L-moments estimation
     number_of_values = np.count_nonzero(~np.isnan(values))
     if (number_of_values < 4):
         message = 'Insufficient number of values to perform sample L-moments estimation'
-        logger.warn(message)
         raise ValueError(message)
 
     # sort the values into ascending order
@@ -201,21 +200,21 @@ def _pearson3_fitting_values(values,
                              data_start_year,
                              calibration_start_year,
                              calibration_end_year):
-    '''
-    This function computes the calendar monthly probability of zero and Pearson Type III distribution fitting parameters 
+    """
+    This function computes the calendar monthly probability of zero and Pearson Type III distribution fitting parameters
     corresponding to an array of monthly values.
-    
-    :param values: 2-D array of monthly values, with each row representing a year containing 12 values corresponding 
+
+    :param values: 2-D array of monthly values, with each row representing a year containing 12 values corresponding
                    to the calendar months of that year, and assuming that the first value of the array is January of the initial year
     :param data_start_year: the initial year of the input values array
-    :param calibration_start_year: the initial year to use for the calibration period 
-    :param calibration_end_year: the final year to use for the calibration period 
+    :param calibration_start_year: the initial year to use for the calibration period
+    :param calibration_end_year: the final year to use for the calibration period
     :return: a 2-D array of monthly fitting values for the Pearson Type III distribution, with shape (4, 12)
-             returned_array[0] == probability of zero for each of the 12 calendar months 
-             returned_array[1] == the first Pearson Type III distribution parameter for each of the 12 calendar months 
-             returned_array[2] == the second Pearson Type III distribution parameter for each of the 12 calendar months 
-             returned_array[3] == the third Pearson Type III distribution parameter for each of the 12 calendar months 
-    '''
+             returned_array[0] == probability of zero for each of the 12 calendar months
+             returned_array[1] == the first Pearson Type III distribution parameter for each of the 12 calendar months
+             returned_array[2] == the second Pearson Type III distribution parameter for each of the 12 calendar months
+             returned_array[3] == the third Pearson Type III distribution parameter for each of the 12 calendar months
+    """
 
     # TODO validate that the values array has shape == (years x 12)
 
@@ -224,11 +223,11 @@ def _pearson3_fitting_values(values,
 
     # make sure that we have data within the full calibration period, otherwise use the full period of record
     if (calibration_start_year < data_start_year) or (calibration_end_year > data_end_year):
-        logger.info('Insufficient data for the specified calibration period ({0}-{1}), instead using the full period ' +
-                    'of record ({2}-{3})'.format(calibration_start_year,
-                                                 calibration_end_year,
-                                                 data_start_year,
-                                                 data_end_year))
+        # logger.info('Insufficient data for the specified calibration period ({0}-{1}), instead using the full period ' +
+        #             'of record ({2}-{3})'.format(calibration_start_year,
+        #                                          calibration_end_year,
+        #                                          data_start_year,
+        #                                          data_end_year))
         calibration_start_year = data_start_year
         calibration_end_year = data_end_year
 
@@ -278,10 +277,10 @@ def _pearson3_fitting_values(values,
                 monthly_fitting_values[2, month_index] = pearson_parameters[1]
                 monthly_fitting_values[3, month_index] = pearson_parameters[2]
 
-            else:
-                logger.warn(
-                    'Due to invalid L-moments the Pearson fitting values for month {0} are defaulting to zero'.format(
-                        month_index))
+            # else:
+            #     logger.warn(
+            #         'Due to invalid L-moments the Pearson fitting values for month {0} are defaulting to zero'.format(
+            #             month_index))
 
     return monthly_fitting_values
 
@@ -290,18 +289,18 @@ def _pearson3_fitting_values(values,
 @jit
 def _pearson3cdf(value,
                  pearson3_parameters):
-    '''
-    Compute the probability that a random variable along the Pearson Type III distribution described by a set 
+    """
+    Compute the probability that a random variable along the Pearson Type III distribution described by a set
     of parameters will be less than or equal to a value.
-    
-    :param value: 
+
+    :param value:
     :param pearson3_parameters:
-    :return 
-    '''
+    :return
+    """
 
     # it's only possible to make the calculation if the second Pearson parameter is above zero
     if pearson3_parameters[1] <= 0.0:
-        logger.debug("The second Pearson parameter is less than or equal to zero, invalid for the CDF calculation")
+        # logger.debug("The second Pearson parameter is less than or equal to zero, invalid for the CDF calculation")
         return np.NaN
 
     result = 0
@@ -336,12 +335,12 @@ def _pearson3cdf(value,
 # ----------------------------------------------------------------------------------------------------------------------
 @jit(float64(float64))
 def _error_function(value):
-    '''
+    """
     TODO
-    
+
     :param value:
-    :return:  
-    '''
+    :return:
+    """
 
     result = 0.0
     if value != 0.0:
@@ -398,20 +397,20 @@ def transform_fitted_pearson(monthly_values,
                              data_start_year,
                              calibration_start_year,
                              calibration_end_year):
-    '''
+    """
     TODO explain this
-    
+
     :param monthly_values: 2-D array of monthly values, with each row representing a year containing twelve calendar months
     :param data_start_year: the initial year of the input values array
-    :param calibration_start_year: the initial year to use for the calibration period 
-    :param calibration_end_year: the final year to use for the calibration period 
+    :param calibration_start_year: the initial year to use for the calibration period
+    :param calibration_end_year: the final year to use for the calibration period
     :return: 2-D array of monthly values, corresponding in size and shape of the input array
     :rtype: numpy.ndarray of floats
-    '''
+    """
 
     # if we're passed all missing values then we can't compute anything, return the same array of missing values
     if np.all(np.isnan(monthly_values)):
-        logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
+        # logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
         return monthly_values
 
     # validate (and possibly reshape) the input array
@@ -424,7 +423,7 @@ def transform_fitted_pearson(monthly_values,
 
         # neither a 1-D nor a 2-D array with valid shape was passed in
         message = 'Invalid input array with shape: {0}'.format(monthly_values.shape)
-        logger.error(message)
+        # logger.error(message)
         raise ValueError(message)
 
     # compute the values we'll use to fit to the Pearson Type III distribution
@@ -500,7 +499,7 @@ def transform_fitted_gamma(monthly_values):
 
     # if we're passed all missing values then we can't compute anything, return the same array of missing values
     if np.all(np.isnan(monthly_values)):
-        logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
+        # logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
         return monthly_values
 
     # validate (and possibly reshape) the input array
@@ -513,7 +512,7 @@ def transform_fitted_gamma(monthly_values):
 
         # neither a 1-D nor a 2-D array with valid shape was passed in
         message = 'Invalid input array with shape: {0}'.format(monthly_values.shape)
-        logger.error(message)
+        # logger.error(message)
         raise ValueError(message)
 
     # find the percentage of zero values for each month
@@ -663,11 +662,11 @@ def pearson3_fitting_values_new(values,
 
     # make sure that we have data within the full calibration period, otherwise use the full period of record
     if (calibration_start_year < data_start_year) or (calibration_end_year > data_end_year):
-        logger.info('Insufficient data for the specified calibration period ({1}-{2}), instead using the full period ' +
-                    'of record ({3}-{4})'.format(calibration_start_year,
-                                                 calibration_end_year,
-                                                 data_start_year,
-                                                 data_end_year))
+        # logger.info('Insufficient data for the specified calibration period ({1}-{2}), instead using the full period ' +
+        #             'of record ({3}-{4})'.format(calibration_start_year,
+        #                                          calibration_end_year,
+        #                                          data_start_year,
+        #                                          data_end_year))
         calibration_start_year = data_start_year
         calibration_end_year = data_end_year
 
