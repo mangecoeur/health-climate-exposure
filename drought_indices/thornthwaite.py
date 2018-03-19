@@ -144,7 +144,7 @@ def _monthly_mean_daylight_hours(latitude_radians,
     """
 
     # get the array of days for each month based on whether or not we're in a leap year
-    if leap == False:
+    if not leap:
         month_days = _MONTH_DAYS_NONLEAP
     else:
         month_days = _MONTH_DAYS_LEAP
@@ -171,6 +171,9 @@ def _monthly_mean_daylight_hours(latitude_radians,
 
 
 # -----------------------------------------------------------------------------------------------------------------------
+
+
+# TODO get this working in nopython mode
 @jit(float64[:](float64[:], float64, int64), nogil=True)
 def potential_evapotranspiration(monthly_temps_celsius,
                                  latitude_degrees,
