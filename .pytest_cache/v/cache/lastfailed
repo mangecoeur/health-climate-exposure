@@ -1,1 +1,3 @@
-{}
+{
+  "drought_indices/test_indices.py::IndicesTestCase::test_spei_gamma_6month": true
+}

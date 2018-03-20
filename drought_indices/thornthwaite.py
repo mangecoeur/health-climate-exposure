@@ -1,4 +1,4 @@
-'''
+"""
 Calculate potential evapotranspiration using the Thornthwaite method.
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -12,13 +12,13 @@ References:
 Thornthwaite, C.W. (1948) An approach toward a rational classification of climate. Geographical Review, Vol. 38, 55-94.
 https://www.jstor.org/stable/210739
 
-Allen, Richard et al (1998) Crop evapotranspiration - Guidelines for computing crop water requirements - 
+Allen, Richard et al (1998) Crop evapotranspiration - Guidelines for computing crop water requirements -
 FAO Irrigation and drainage paper 56
 ISBN 92-5-104219-5
 
 Goswami, D. Yogi (2015) Principles of Solar Engineering, Third Edition
 ISBN 97-8-146656-3780
-'''
+"""
 
 import calendar
 import logging
@@ -53,10 +53,10 @@ _SOLAR_DECLINATION_RADIANS_MAX = np.deg2rad(23.45)
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit(float64(float64, float64))
+@jit(float64(float64, float64), nopython=True)
 def _sunset_hour_angle(latitude_radians,
                        solar_declination_radians):
-    '''
+    """
     Calculate sunset hour angle (*Ws*) from latitude and solar declination.
 
     Based on FAO equation 25 in Allen et al (1998).
@@ -65,19 +65,17 @@ def _sunset_hour_angle(latitude_radians,
     :param solar_declination_radians: angle of solar declination in radians
     :return: sunset hour angle in radians
     :rtype: float
-    '''
+    """
 
     # validate the latitude argument
+    # NOTE: ensure error messages are constants to allow nopython mode
     if not _LATITUDE_RADIANS_MIN <= latitude_radians <= _LATITUDE_RADIANS_MAX:
-        raise ValueError('latitude outside valid range [{0!r} to {1!r}]: {2!r}'
-                         .format(_LATITUDE_RADIANS_MIN, _LATITUDE_RADIANS_MAX, latitude_radians))
+        raise ValueError('latitude outside valid range [-pi/2 to pi/2]')
 
     # validate the solar declination angle argument, which can vary between -23.45 and +23.45 degrees
     # see Goswami (2015) p.40, and http://www.itacanet.org/the-sun-as-a-source-of-energy/part-1-solar-astronomy/
     if not _SOLAR_DECLINATION_RADIANS_MIN <= solar_declination_radians <= _SOLAR_DECLINATION_RADIANS_MAX:
-        raise ValueError('solar declination angle outside valid range [{0!r} to {1!r}]: {2!r}'
-                         .format(_SOLAR_DECLINATION_RADIANS_MIN, _SOLAR_DECLINATION_RADIANS_MAX,
-                                 solar_declination_radians))
+        raise ValueError('solar declination angle outside valid range [-pi/2 to pi/2]')
 
     # calculate the cosine of the sunset hour angle (*Ws* in FAO 25) from latitude and solar declination
     cos_sunset_hour_angle = -math.tan(latitude_radians) * math.tan(solar_declination_radians)
@@ -90,9 +88,9 @@ def _sunset_hour_angle(latitude_radians,
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit(float64(int64))
+@jit(float64(int64), nopython=True)
 def _solar_declination(day_of_year):
-    '''
+    """
     Calculate the angle of solar declination from day of the year.
 
     Based on FAO equation 24 in Allen et al (1998).
@@ -100,16 +98,16 @@ def _solar_declination(day_of_year):
     :param day_of_year: day of year integer between 1 and 365 (or 366, in the case of a leap year)
     :return: solar declination [radians]
     :rtype: float
-    :raise ValueError: if the day of year value is not within the range [1-366] 
-    '''
+    :raise ValueError: if the day of year value is not within the range [1-366]
+    """
     if not 1 <= day_of_year <= 366:
-        raise ValueError('Day of the year must be in the range [1-366]: {0!r}'.format(day_of_year))
+        raise ValueError('Day of the year must be in the range [1-366]')
 
     return 0.409 * math.sin(((2.0 * math.pi / 365.0) * day_of_year - 1.39))
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit(float64(float64))
+@jit(float64(float64), nopython=True)
 def _daylight_hours(sunset_hour_angle_radians):
     """
     Calculate daylight hours from a sunset hour angle.
@@ -125,15 +123,14 @@ def _daylight_hours(sunset_hour_angle_radians):
     # validate the sunset hour angle argument, which has a valid range of 0 to pi radians (180 degrees), inclusive
     # see http://mypages.iit.edu/~maslanka/SolarGeo.pdf
     if not 0.0 <= sunset_hour_angle_radians <= math.pi:
-        raise ValueError('sunset hour angle outside valid range [{0!r} to {1!r}]: {2!r}'
-                         .format(0.0, math.pi, sunset_hour_angle_radians))
+        raise ValueError('sunset hour angle outside valid range [0 to pi]')
 
     # calculate daylight hours from the sunset hour angle
     return (24.0 / math.pi) * sunset_hour_angle_radians
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit(float64[:](float64, boolean))
+@jit(float64[:](float64, boolean), nopython=True)
 def _monthly_mean_daylight_hours(latitude_radians,
                                  leap=False):
     """

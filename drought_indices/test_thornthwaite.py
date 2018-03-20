@@ -6,7 +6,7 @@ import numpy as np
 from . import thornthwaite
 
 # disable logging messages
-logging.disable(logging.CRITICAL)
+# logging.disable(logging.CRITICAL)
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 class ThornthwaiteTestCase(unittest.TestCase):

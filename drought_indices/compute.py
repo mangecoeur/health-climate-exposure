@@ -126,7 +126,7 @@ def _estimate_pearson3_parameters(lmoments):
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit
+@jit(nopython=True)
 def _estimate_lmoments(values):
     """
     Estimate sample L-moments, based on Fortran code written for inclusion in IBM Research Report RC20525,
@@ -144,7 +144,7 @@ def _estimate_lmoments(values):
     """
 
     # we need to have at least four values in order to make a sample L-moments estimation
-    number_of_values = np.count_nonzero(~np.isnan(values))
+    number_of_values = (~np.isnan(values)).sum()
     if (number_of_values < 4):
         message = 'Insufficient number of values to perform sample L-moments estimation'
         raise ValueError(message)
@@ -286,7 +286,10 @@ def _pearson3_fitting_values(values,
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-@jit
+
+
+# NOTE could vectorize this
+@jit()
 def _pearson3cdf(value,
                  pearson3_parameters):
     """
@@ -305,7 +308,7 @@ def _pearson3cdf(value,
 
     result = 0
     skew = pearson3_parameters[2]
-    if abs(skew) <= 1e-6:
+    if np.abs(skew) <= 1e-6:
         z = (value - pearson3_parameters[0]) / pearson3_parameters[1]
         return 0.5 + (0.5 * _error_function(z * sqrt(0.5)))
 
@@ -333,7 +336,7 @@ def _pearson3cdf(value,
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-@jit(float64(float64))
+@jit(float64(float64), nopython=True)
 def _error_function(value):
     """
     TODO
@@ -438,13 +441,9 @@ def transform_fitted_pearson(monthly_values,
     # compute Pearson CDF -> probability values -> fitted values for the entire period of record
     probability_of_zero = 0.0
     probability_value = 0.0
-    pearson_parameters = np.zeros((3,))
-    for year_index in range(monthly_values.shape[0]):
-        for calendar_month_index in range(12):
 
-            pearson_parameters[0] = monthly_pearson_values[1, calendar_month_index]  # first Pearson Type III parameter
-            pearson_parameters[1] = monthly_pearson_values[2, calendar_month_index]  # second Pearson Type III parameter
-            pearson_parameters[2] = monthly_pearson_values[3, calendar_month_index]  # third Pearson Type III parameter
+    for year_index in range(monthly_values.shape[0]):
+        for calendar_month_index in range(monthly_values.shape[1]):
             probability_of_zero = monthly_pearson_values[0, calendar_month_index]
 
             # only fit to the distribution if we don't have a fill value for the current month's scale sum
@@ -470,12 +469,12 @@ def transform_fitted_pearson(monthly_values,
                 else:
 
                     # calculate the CDF value corresponding to the current month's value
+                    pearson_parameters = monthly_pearson_values[1:, calendar_month_index]
                     pe3_cdf = _pearson3cdf(monthly_values[year_index, calendar_month_index], pearson_parameters)
 
                 if not math.isnan(pe3_cdf):
                     # calculate the probability value, clipped between 0 and 1
-                    probability_value = np.clip((probability_of_zero + ((1.0 - probability_of_zero) * pe3_cdf)), 0.0,
-                                                1.0)
+                    probability_value = np.clip((probability_of_zero + ((1.0 - probability_of_zero) * pe3_cdf)), 0.0, 1.0)
 
                     # the values we'll return are the values at which the probabilities of a normal distribution are less than or equal to
                     # the computed probabilities, as determined by the normal distribution's quantile (or inverse cumulative distribution) function  
@@ -485,7 +484,7 @@ def transform_fitted_pearson(monthly_values,
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit
+@jit(nogil=True)
 def transform_fitted_gamma(monthly_values):
     '''
     TODO explain this    
