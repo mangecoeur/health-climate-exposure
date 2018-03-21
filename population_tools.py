@@ -280,7 +280,7 @@ def get_water_mask(target, file_path):
 
 
 
-
+# TODO simplify this
 class PopulationProjector(AbstractContextManager):
     def __init__(self, population_file,
                  mask_empty=True):
@@ -293,15 +293,6 @@ class PopulationProjector(AbstractContextManager):
 
         self.affine = get_affine(self.data.population)
 
-        # TODO cleanup. Water mask is now saved with the population
-        # water_mask_path = POP_DATA_SRC / 'water_mask_eightres.tif'
-        # if water_mask_file is None:
-        #     water_mask_path = POP_DATA_SRC / 'water_mask_sixteenres.tif'
-        # else:
-        #     water_mask_path = POP_DATA_SRC / water_mask_file
-
-        # self.water_mask = get_water_mask(self.data, water_mask_path)
-        # self.water_mask.shape = (*self.water_mask.shape, 1)
         self.mask_empty = mask_empty
 
         if self.mask_empty:
