@@ -65,6 +65,7 @@ def _count_zeros_and_non_missings(values):
 
 
 # -----------------------------------------------------------------------------------------------------------------------
+@jit(float64(float64))
 def _estimate_pearson3_parameters(lmoments):
     """
     Estimate parameters via L-moments for the Pearson Type III distribution, based on Fortran code written
@@ -126,7 +127,7 @@ def _estimate_pearson3_parameters(lmoments):
 
 
 # -----------------------------------------------------------------------------------------------------------------------
-@jit(nopython=True)
+@jit(nopython=True, nogil=True)
 def _estimate_lmoments(values):
     """
     Estimate sample L-moments, based on Fortran code written for inclusion in IBM Research Report RC20525,
@@ -336,7 +337,7 @@ def _pearson3cdf(value,
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-@jit(float64(float64), nopython=True)
+@jit(float64(float64), nopython=True, nogil=True)
 def _error_function(value):
     """
     TODO

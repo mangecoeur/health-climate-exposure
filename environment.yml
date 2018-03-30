@@ -1,33 +1,33 @@
 name: lancet
-channels: !!python/tuple
-- conda-forge
-- defaults
+channels:
+  - conda-forge/label/dev
+  - conda-forge
+  - defaults
 dependencies:
-- python=3.6
-- affine
-- bokeh
-- cartopy
-- dask
-- descartes
-- distributed
-- fiona
-- h5py
-- ipykernel
-- ipython
-- joblib
-- matplotlib
-- netcdf4
-- pandas
-- psycopg2
-- rasterio
-- rtree
-- shapely
-- sqlalchemy
-- xarray
-- numba
-- numpy
-- scipy
-- tqdm
-- pip:
-  - ecmwf-api-client
-prefix: /Users/jonathanchambers/miniconda3/envs/lancet
+  - h5netcdf
+  - h5py
+  - joblib
+  - jupyter
+  - matplotlib
+  - netcdf4
+  - pip
+  - psycopg2
+  - python=3.6.2=0
+  - sqlalchemy
+  - dask
+  - distributed
+  - ipykernel
+  - ipython
+  - ipywidgets
+  - notebook
+  - numba
+  - numpy
+  - pandas
+  - scipy
+  - seaborn
+  - tqdm
+  - widgetsnbextension
+  - xarray
+  - pip:
+    - ecmwf-api-client
+

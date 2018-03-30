@@ -21,8 +21,8 @@ WEATHER_NAMES = [
 ]
 
 
-def weather_mfdataset(root_path, rename=True):
-    data = xr.open_mfdataset(str(root_path) + '/*.nc', engine='scipy')
+def weather_mfdataset(root_path, rename=True, **kwargs):
+    data = xr.open_mfdataset(str(root_path) + '/*.nc', engine='scipy', **kwargs)
     if rename:
         data = data.rename({r.ncdf_name: r.common_name for r in WEATHER_NAMES if r.ncdf_name in data.variables})
     return data

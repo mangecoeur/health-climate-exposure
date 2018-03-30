@@ -92,13 +92,13 @@ def fetch_summer_temperatures(out_folder, start=1980, end=2018):
         fetch_single_summer_year(year, out_folder)
 
 
-def fetch_single_year_temperatures(year, out_folder):
+def fetch_single_year_daily_sfc(year, out_folder):
     server = ECMWFDataServer()
     rng = pd.date_range('{year}-01-01'.format(year=year),
                         '{year}-12-31'.format(year=year), freq='D')
 
     date_list = '/'.join((t.strftime('%Y-%m-%d') for t in rng))
-    out_file = str(out_folder / "{year}_temperature_2m.nc".format(year=year))
+    out_file = str(out_folder / "{year}_daily_sfc.nc".format(year=year))
     server.retrieve({
         "class": "ei",
         "dataset": "interim",
@@ -106,7 +106,7 @@ def fetch_single_year_temperatures(year, out_folder):
         "expver": "1",
         "grid": "0.75/0.75",
         "levtype": "sfc",
-        "param": "167.128",
+        "param": "134.128/167.128/168.128",
         "step": "0",
         "stream": "oper",
         "time": "00:00:00/06:00:00/12:00:00/18:00:00",
@@ -117,7 +117,7 @@ def fetch_single_year_temperatures(year, out_folder):
     return
 
 
-def fetch_temperatures(out_folder, start=1980, end=2018):
+def fetch_daily_sfc(out_folder, start=1980, end=2018):
     """
     Get the 6-hourly 2m air temperatures
 
@@ -130,7 +130,7 @@ def fetch_temperatures(out_folder, start=1980, end=2018):
     """
 
     for year in range(start, end):
-        fetch_single_year_temperatures(year, out_folder)
+        fetch_single_year_daily_sfc(year, out_folder)
 
 
 def fetch_monthly_precipitation_year(year, out_folder):
@@ -175,7 +175,7 @@ def fetch_monthly_precipitation(out_folder, start=1980, end=2018):
 
 
 FUNCTION_OPTS = {
-    'temperature': fetch_temperatures,
+    'daily_sfc': fetch_daily_sfc,
     'summer_temperature': fetch_summer_temperatures,
     'monthly_precipitation': fetch_monthly_precipitation,
     'monthly_means': fetch_monthly_mean_vars
