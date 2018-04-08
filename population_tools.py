@@ -199,6 +199,14 @@ def do_derez(how='sum'):
             executor.submit(derez_population_and_save_geotiff, population_file, year, N_ITERS_DEREZ, how)
 
 
+def get_affine_latlon(lat, lon):
+    dx = (lon[1] - lon[0]).values
+    px = lon[0].values
+    dy = (lat[1] - lat[0]).values
+    py = lat[0].values
+    return Affine(dx, 0, px, 0, dy, py)
+
+
 def get_affine(data):
     """
     Get an Affine transform from a data object with longitude and latitude attributes
@@ -206,15 +214,15 @@ def get_affine(data):
         data: 
 
     Returns:
-
+        Affine
     """
-    lon = data.longitude
-    lat = data.latitude
-    dx = (lon[1] - lon[0]).values
-    px = lon[0].values
-    dy = (lat[1] - lat[0]).values
-    py = lat[0].values
-    return Affine(dx, 0, px, 0, dy, py)
+    lon = data.longitude if 'longitude' in data.coords else data.lon
+    lat = data.latitude if 'latitude' in data.coords else data.lat
+
+    return get_affine_latlon(lat, lon)
+
+
+
 
 
 def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
@@ -258,9 +266,9 @@ def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
     return raster
 
 
-@jit(cache=True)
+# @jit(cache=True)
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon):
-    reproj = np.empty(shape=shape[0:2])
+    reproj = np.empty(shape=shape)
     # TODO do you really need rasterio? could just use scipy interp.
     reproject(
         src_data.values, reproj,
@@ -289,25 +297,20 @@ def project_param(target: xr.DataArray, param: xr.DataArray, crs=None):
 
     Args:
         target: Target DataArray with latitude and longitude coordinates
-        param:
+        param: 2D DataArray
 
     Returns:
 
     """
-    affine = get_affine(target)
+    target_affine = get_affine(target)
+    input_affine = get_affine(param)
+
     crs = crs if crs else CRS({'init': 'epsg:4326'})
 
-    lon = param.longitude if 'longitude' in param.coords else param.lon
-    lat = param.latitude if 'latitude' in param.coords else param.lat
-    dx = (lon[1] - lon[0]).values
-    px = lon[0].values
-
-    dy = (lat[1] - lat[0]).values
-    py = lat[0].values
-
-    input_affine = Affine(dx, 0, px, 0, dy, py)
-    return reproject_to(target.shape, param, input_affine, affine, crs,
+    return reproject_to((1, *target.shape), param, input_affine, target_affine, crs,
                         target.latitude, target.longitude)
+    # return reproject_to(target.shape, param, input_affine, target_affine, crs,
+    #                     target.latitude, target.longitude)
 
 
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
@@ -362,20 +365,31 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
         end_year = datetime.datetime.now().year
 
     with load_masked_population(population_file) as pop_data:
-        pop_data = load_masked_population(population_file)
         if weights is not None:
-            pop_sel = (pop_data.population * weights).compute()
+            pop_sel = (pop_data.population * weights)
         else:
             pop_sel = pop_data.population
         pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
-        def do(year):
-            proj = project_param(pop_sel, data.sel(year=year))
-            proj = proj * pop_sel.sel(year=year)
-            if norm:
-                proj = proj / pop_sum.sel(year=year)
-            return proj.compute()
+        target_shape = (len(pop_data.latitude), len(pop_data.longitude))
+        target_affine = get_affine(pop_data)
+        input_affine = get_affine(data)
+        crs = CRS({'init': 'epsg:4326'})
 
+        # This avoids trying to compute everything at once, which would use too much RAM
+        def do(year):
+            pop = pop_sel.sel(year=year).load()
+
+            proj = reproject_to(target_shape,
+                                data.sel(year=year).load(),
+                                input_affine, target_affine, crs,
+                                pop_data.latitude, pop_data.longitude)
+
+            proj = proj * pop
+            if norm:
+                proj = proj / pop_sum
+            return proj.compute().squeeze()
+        # TODO if we are only calculating the sum, don
         exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
         exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
                                      skipna=True).compute()
