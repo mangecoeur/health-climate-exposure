@@ -270,7 +270,6 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon)
         dst_crs=crs,
         resample=Resampling.cubic_spline)
 
-    # reproj.shape = (shape[0], shape[1], 1)
     # Wrap as DataArray to make sure the coordinates line up
     reproj = xr.DataArray(reproj,
                           coords={'latitude': out_lat,
@@ -311,32 +310,13 @@ def project_param(target: xr.DataArray, param: xr.DataArray, crs=None):
                         target.latitude, target.longitude)
 
 
-class Population(AbstractContextManager):
-    def __init__(self, population_file):
-        self.crs = CRS({'init': 'epsg:4326'})
-
-        self.data: xr.Dataset = xr.open_dataset(str(population_file), chunks={'year': 2})
-
-        if 'lon' in self.data.dims:
-            self.data = self.data.rename({'lon': 'longitude', 'lat': 'latitude'})
-
-        self.population = self.data.water_mask * self.data.population.where(self.data.population > 1e-08)
-
-    @property
-    def empty_mask(self):
-        return self.data.water_mask & (self.data.population > 1e-08)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.data.close()
-
-
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
 
 
 def load_masked_population(population_file=DEFAULT_POP_FILE):
     """
     Shortcut to load the population file with the mask to remove areas of
-    water and non-populated areas (population < 1e-8)
+    water and non-populated areas (population < 1e-8 to account for rouding errors)
 
     Args:
         population_file: path to population input file which includes 'population'
@@ -346,14 +326,15 @@ def load_masked_population(population_file=DEFAULT_POP_FILE):
         population dataset including masked population data and water mask
     """
     data: xr.Dataset = xr.open_dataset(str(population_file),
-                                       chunks={'year': 2})
+                                       chunks={'year': 1})
 
     if 'lon' in data.dims:
         data = data.rename({'lon': 'longitude', 'lat': 'latitude'})
 
-    data['empty_mask'] = data.water_mask & (data.population > 1e-08)
+    data['empty_mask'] = data.water_mask * (data.population > 1e-08)
     data['population'] = data.water_mask * data.population.where(data.population > 1e-08)
     return data
+
 
 # TODO adjust tqdm to work in notebook and non-notebook
 def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
@@ -380,28 +361,29 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
         # Default to current year
         end_year = datetime.datetime.now().year
 
-    # with PopulationLoader(population_file, ) as pop_file:
-    pop_data = load_masked_population(population_file)
-    if weights is not None:
-        pop_sel = (pop_data.population * weights).compute()
-    else:
-        pop_sel = pop_data.population
-    pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
+    with load_masked_population(population_file) as pop_data:
+        pop_data = load_masked_population(population_file)
+        if weights is not None:
+            pop_sel = (pop_data.population * weights).compute()
+        else:
+            pop_sel = pop_data.population
+        pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
-    def do(year):
-        proj = project_param(pop_sel, data.sel(year=year))
-        proj = proj * pop_sel.sel(year=year)
-        if norm:
-            proj = proj / pop_sum.sel(year=year)
-        return proj.compute()
+        def do(year):
+            proj = project_param(pop_sel, data.sel(year=year))
+            proj = proj * pop_sel.sel(year=year)
+            if norm:
+                proj = proj / pop_sum.sel(year=year)
+            return proj.compute()
 
-    exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
-    exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
-                                 skipna=True).compute()
+        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
+        exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
+                                     skipna=True).compute()
 
-    pop_data.close()
     return exposures_ts
 
+
+# TODO clean this part up/move to notebook with explanations. Clean up global settings vars
 
 N_ITERS_DEREZ = 3  # equivalent to 1/8th original resolution
 REZ_FIX = 'eightres'
@@ -419,4 +401,3 @@ _POP_ORIGINAL_TMPL = 'gpw-v4-population-{type}-adjusted-to-2015-unwpp-country-to
 if __name__ == '__main__':
     # do_derez(how='sum')
     interp_to_netcdf()
-
