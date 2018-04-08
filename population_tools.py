@@ -279,11 +279,9 @@ def get_water_mask(target, file_path):
     return new_mask
 
 
-
 # TODO simplify this
 class PopulationProjector(AbstractContextManager):
-    def __init__(self, population_file,
-                 mask_empty=True):
+    def __init__(self, population_file):
         self.crs = CRS({'init': 'epsg:4326'})
 
         self.data: xr.Dataset = xr.open_dataset(str(population_file), chunks={'year': 2})
@@ -293,12 +291,7 @@ class PopulationProjector(AbstractContextManager):
 
         self.affine = get_affine(self.data.population)
 
-        self.mask_empty = mask_empty
-
-        if self.mask_empty:
-            self.population = self.data_empty_masked
-        else:
-            self.population = self.data.popilation
+        self.population = self.data.water_mask * self.data.population.where(self.data.population > 1e-08)
 
     @property
     def data_water_masked(self) -> xr.Dataset:
@@ -307,7 +300,7 @@ class PopulationProjector(AbstractContextManager):
             Population with areas of water and ice replaced with NaN
         """
 
-        return self.population * self.data.water_mask
+        return self.data.population * self.data.water_mask
 
     @property
     def data_empty_masked(self) -> xr.Dataset:
@@ -315,12 +308,9 @@ class PopulationProjector(AbstractContextManager):
         Returns:
             Population with areas of water and ice replaced with NaN
         """
-        da = xr.DataArray(self.data.water_mask, coords=[self.data.latitude, self.data.longitude],
-                          dims=['latitude', 'longitude'],
-                          name='water_mask')
-        return da * self.data.population.where(self.data.population > 1e-08)
+        return self.data.water_mask * self.data.population.where(self.data.population > 1e-08)
 
-    def rasterize_data(self, table, key, affine=None):
+    def rasterize_data(self, table, key, affine=None) -> np.ndarray:
         """
         Rasterize a geopandas table with a geometry column
         onto the population grid, setting the shape regions to the
@@ -336,11 +326,15 @@ class PopulationProjector(AbstractContextManager):
         Args:
             table: GeoPandas table
             key: Table column name
+            affine: Transformation from pixel coordinates of image to the
+            coordinate system of the input shapes.
 
         Returns:
+            Numpy array of rasterized table data rasterized onto same grid as
+            population data
 
         """
-        # NOTE: it seems that rasterize wants -180 to 180 :/
+        # NOTE: it seems that rasterize wants -180 to 180, even though it should accept arbitrary affine :/
         # Figure out the transform from the geopandas to the raster
         # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
         affine = affine if affine else self.affine
@@ -377,11 +371,7 @@ class PopulationProjector(AbstractContextManager):
 
         input_affine = Affine(dx, 0, px, 0, dy, py)
 
-        if self.mask_empty:
-            # projected = projected * self.water_mask
-            pop_year = self.data_empty_masked.sel(year=year)
-        else:
-            pop_year = self.population.sel(year=year)
+        pop_year = self.population.sel(year=year)
 
         projected = reproject_to(pop_year.shape, param,
                                  input_affine, self.affine, self.crs,
@@ -418,36 +408,49 @@ class PopulationProjector(AbstractContextManager):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data.close()
 
+
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
 
+
 # TODO adjust tqdm to work in notebook and non-notebook
-# TODO documentation
 # TODO simplify code, probably don't really need the context manager anymore.
-def project_to_population(anom_data, demographics=None, norm=False, start_year=2000, end_year=None,
+def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
                           population_file=DEFAULT_POP_FILE):
     """
+    Resample a gridded timeseries dataset to match the grid of the given population file
+    and multiply the values in each cell by the corresponding population, optionally
+    normalising by the total population
     
     Args:
-        anom_data: the data to project to the population grid
+        data: the yearly data to project to the population grid
+        weights: an optional grid with same dimensions as the population grid containing
+        weightings for each cell, e.g. the fraction of the population to be considered for
+        the given data
+        norm (bool): whether to normalise by the total population, default False
+        start_year:
+        end_year:
+        population_file: name of the population NetCDF file to use
+
+    Returns:
+        time series of population weighted and optionally `weights` weighted time series
     """
     if end_year is None:
         # Default to current year
         end_year = datetime.datetime.now().year
 
-    with PopulationProjector(population_file,) as pop:
-        if demographics is not None:
-            pop_sel = (pop.population * demographics).compute()
+    with PopulationProjector(population_file,) as pop_file:
+        if weights is not None:
+            pop_sel = (pop_file.population * weights).compute()
         else:
-            pop_sel = pop.population
+            pop_sel = pop_file.population
         pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
         def do(year):
-            proj = pop.project_param(anom_data.sel(year=year))
+            proj = pop_file.project_param(data.sel(year=year))
             proj = proj * pop_sel.sel(year=year)
             if norm:
                 proj = proj / pop_sum.sel(year=year)
             return proj.compute()
-
 
         exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
         exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
