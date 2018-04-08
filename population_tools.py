@@ -77,6 +77,21 @@ def lin_interp(year_one, interval):
     return population_one, gradient
 
 
+@jit
+def create_timeseries(height, interval, width):
+    years = [2000, 2005, 2010, 2015]
+    n_timesteps = len(years) * interval
+    out = np.empty(shape=(height, width, n_timesteps))
+    for yi, year in enumerate(years):
+        print('Working on ', year)
+
+        intercept, gradient = lin_interp(year, interval)
+
+        for i in range(interval):
+            out[:, :, yi * interval + i] = intercept + i * gradient
+    return out
+
+
 def interp_to_netcdf():
     interval = 5
     height, width = get_shape()
@@ -116,22 +131,7 @@ def interp_to_netcdf():
     print('Done')
 
 
-@jit
-def create_timeseries(height, interval, width):
-    years = [2000, 2005, 2010, 2015]
-    n_timesteps = len(years) * interval
-    out = np.empty(shape=(height, width, n_timesteps))
-    for yi, year in enumerate(years):
-        print('Working on ', year)
-
-        intercept, gradient = lin_interp(year, interval)
-
-        for i in range(interval):
-            out[:, :, yi * interval + i] = intercept + i * gradient
-    return out
-
-
-def derez_population(population_file_path, year, n_iters=1, how='sum'):
+def derez_population(population_file_path, n_iters=1, how='sum'):
     with rasterio.open(str(population_file_path)) as pop:
         print(pop.meta)
         pop_meta = pop.meta
@@ -162,8 +162,7 @@ def derez_population(population_file_path, year, n_iters=1, how='sum'):
             population = population / 4
         # Output affine scaled by 2
         trns = Affine(trns.a * 2, trns.b, trns.c, trns.d, trns.e * 2, trns.f)
-    # Reduction to 1/4 of the original size already makes life much easier
-    save_population_geotiff(trns, pop_meta, population, year)
+    return population, pop_meta, trns
 
 
 def save_population_geotiff(trns, pop_meta, population, year):
@@ -181,21 +180,82 @@ def save_population_geotiff(trns, pop_meta, population, year):
                        transform=trns,
                        compress='lzw') as new_dataset:
         new_dataset.write(population, 1)
-        # new_dataset.write_mask(np.invert(population.mask))
+
+
+def derez_population_and_save_geotiff(population_file, year, n_iters, how):
+    population, pop_meta, trns = derez_population(population_file, n_iters=n_iters, how=how)
+    save_population_geotiff(trns, pop_meta, population, year)
 
 
 def do_derez(how='sum'):
-    global year
     from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=8) as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
         for year in [2000, 2005, 2010, 2015, 2020]:
-            # for year in [2020]:
             print(f'Proc for {year}')
             population_file = (_POP_SRC /
                                _POP_ORIGINAL_FOLDER_TMPL.format(type=POP_TYPE, year=year) /
                                (_POP_ORIGINAL_TMPL.format(type=POP_TYPE, year=year) + '.tif'))
 
-            executor.submit(derez_population, population_file, year, N_ITERS_DEREZ, how)
+            executor.submit(derez_population_and_save_geotiff, population_file, year, N_ITERS_DEREZ, how)
+
+
+def get_affine(data):
+    """
+    Get an Affine transform from a data object with longitude and latitude attributes
+    Args:
+        data: 
+
+    Returns:
+
+    """
+    lon = data.longitude
+    lat = data.latitude
+    dx = (lon[1] - lon[0]).values
+    px = lon[0].values
+    dy = (lat[1] - lat[0]).values
+    py = lat[0].values
+    return Affine(dx, 0, px, 0, dy, py)
+
+
+def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
+    """
+    Rasterize a geopandas table with a geometry column
+    onto the population grid, setting the shape regions to the
+    value in the column name 'key'
+
+    Returns a raster that should match the population bits,
+    on grid 0 to 360.
+
+    Note that need some fiddling for this, not certain how the
+    projection is working but seems to want to assume -180 to 180 input/output
+    so have to roll to get ERA compatible layout
+
+    Args:
+        target_dataset: dataset with lat, lon, and 2D grid data which will be used as the rasterization target
+        table: GeoPandas table
+        key: Table column name
+        affine: Transformation from pixel coordinates of image to the
+        coordinate system of the input shapes.
+
+    Returns:
+        Numpy array of rasterized table data rasterized onto same grid as
+        population data
+
+    """
+    # NOTE: it seems that rasterize wants -180 to 180, even though it should accept arbitrary affine :/
+    # Figure out the transform from the geopandas to the raster
+    # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
+    affine = affine if affine else get_affine(target_dataset)
+
+    raster = features.rasterize(
+        ((r.geometry, r[key]) for _, r in table.iterrows()),
+        out_shape=target_dataset.shape[:2],
+        transform=affine
+    )
+    # Roll the result to fix affine oddity
+    raster = np.roll(raster, -raster.shape[1] // 2, axis=1)
+
+    return raster
 
 
 @jit(cache=True)
@@ -223,64 +283,35 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon)
     return reproj
 
 
-def get_affine(data):
+def project_param(target: xr.DataArray, param: xr.DataArray, crs=None):
     """
-    Get an Affine transform from a data object with longitude and latitude attributes
+    Project parameter to the target grid, assuming all are in
+    CRS 4326
+
     Args:
-        data: 
+        target: Target DataArray with latitude and longitude coordinates
+        param:
 
     Returns:
 
     """
-    lon = data.longitude
-    lat = data.latitude
+    affine = get_affine(target)
+    crs = crs if crs else CRS({'init': 'epsg:4326'})
+
+    lon = param.longitude if 'longitude' in param.coords else param.lon
+    lat = param.latitude if 'latitude' in param.coords else param.lat
     dx = (lon[1] - lon[0]).values
     px = lon[0].values
+
     dy = (lat[1] - lat[0]).values
     py = lat[0].values
-    return Affine(dx, 0, px, 0, dy, py)
+
+    input_affine = Affine(dx, 0, px, 0, dy, py)
+    return reproject_to(target.shape, param, input_affine, affine, crs,
+                        target.latitude, target.longitude)
 
 
-def get_water_mask(target, file_path):
-    """
-    Get the water mask on 0-360 lon range
-
-    Args:
-        target:
-
-    Returns:
-
-    """
-
-    with rasterio.open(str(file_path)) as pop:
-        pop_mask = pop.read(1)
-
-
-        new_mask = np.empty(shape=(len(target.latitude),
-                                   len(target.longitude)))
-
-        new_aff = get_affine(target)
-        # Override xform to ensure -180 to 180 range
-        transform = Affine(new_aff.a, 0, -180, 0, new_aff.e, new_aff.f)
-        reproject(
-            pop_mask, new_mask,
-            src_transform=pop.transform,
-            dst_transform=transform,
-            src_crs=pop.crs,
-            dst_crs=pop.crs,
-            resample=Resampling.bilinear)
-
-    # Roll to fix -180 to 180 vs 0 to 360 convention
-
-    width = new_mask.shape[1]
-    new_mask = np.roll(new_mask, -width // 2, axis=1)
-    # TODO should this be as int or should we set 0 to nan
-    new_mask[new_mask == 0] = np.nan
-    return new_mask
-
-
-# TODO simplify this
-class PopulationProjector(AbstractContextManager):
+class Population(AbstractContextManager):
     def __init__(self, population_file):
         self.crs = CRS({'init': 'epsg:4326'})
 
@@ -289,121 +320,11 @@ class PopulationProjector(AbstractContextManager):
         if 'lon' in self.data.dims:
             self.data = self.data.rename({'lon': 'longitude', 'lat': 'latitude'})
 
-        self.affine = get_affine(self.data.population)
-
         self.population = self.data.water_mask * self.data.population.where(self.data.population > 1e-08)
 
     @property
-    def data_water_masked(self) -> xr.Dataset:
-        """
-        Returns:
-            Population with areas of water and ice replaced with NaN
-        """
-
-        return self.data.population * self.data.water_mask
-
-    @property
-    def data_empty_masked(self) -> xr.Dataset:
-        """
-        Returns:
-            Population with areas of water and ice replaced with NaN
-        """
-        return self.data.water_mask * self.data.population.where(self.data.population > 1e-08)
-
-    def rasterize_data(self, table, key, affine=None) -> np.ndarray:
-        """
-        Rasterize a geopandas table with a geometry column
-        onto the population grid, setting the shape regions to the
-        value in the column name 'key'
-        
-        Returns a raster that should match the population bits,
-        on grid 0 to 360.
-        
-        Note that need some fiddling for this, not certain how the
-        projection is working but seems to want to assume -180 to 180 input/output
-        so have to roll to get ERA compatible layout
-        
-        Args:
-            table: GeoPandas table
-            key: Table column name
-            affine: Transformation from pixel coordinates of image to the
-            coordinate system of the input shapes.
-
-        Returns:
-            Numpy array of rasterized table data rasterized onto same grid as
-            population data
-
-        """
-        # NOTE: it seems that rasterize wants -180 to 180, even though it should accept arbitrary affine :/
-        # Figure out the transform from the geopandas to the raster
-        # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
-        affine = affine if affine else self.affine
-
-        raster = features.rasterize(
-            ((r.geometry, r[key]) for _, r in table.iterrows()),
-            out_shape=self.population.shape[:2],
-            transform=affine
-        )
-        # Roll the result to fix affine oddity
-        raster = np.roll(raster, -raster.shape[1] // 2, axis=1)
-
-        return raster
-
-    def project(self, year, param: xr.DataArray):
-        """
-        Project param onto the population grid and multiply by population values
-        
-        Args:
-            year: 
-            param: 
-
-        Returns:
-
-        """
-
-        lon = param.longitude if 'longitude' in param.coords else param.lon
-        lat = param.latitude if 'latitude' in param.coords else param.lat
-        dx = (lon[1] - lon[0]).values
-        px = lon[0].values
-
-        dy = (lat[1] - lat[0]).values
-        py = lat[0].values
-
-        input_affine = Affine(dx, 0, px, 0, dy, py)
-
-        pop_year = self.population.sel(year=year)
-
-        projected = reproject_to(pop_year.shape, param,
-                                 input_affine, self.affine, self.crs,
-                                 pop_year.latitude, pop_year.longitude)
-
-        projected = pop_year * projected
-
-        return projected
-
-    def project_param(self, param: xr.DataArray):
-        """
-        Project parameter to the population grid, but don't multiply
-        
-        Args:
-            year: 
-            param: 
-
-        Returns:
-
-        """
-
-        lon = param.longitude if 'longitude' in param.coords else param.lon
-        lat = param.latitude if 'latitude' in param.coords else param.lat
-        dx = (lon[1] - lon[0]).values
-        px = lon[0].values
-
-        dy = (lat[1] - lat[0]).values
-        py = lat[0].values
-
-        input_affine = Affine(dx, 0, px, 0, dy, py)
-        return reproject_to(self.population.shape, param, input_affine, self.affine, self.crs,
-                            self.population.latitude, self.population.longitude)
+    def empty_mask(self):
+        return self.data.water_mask & (self.data.population > 1e-08)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data.close()
@@ -412,8 +333,29 @@ class PopulationProjector(AbstractContextManager):
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
 
 
+def load_masked_population(population_file=DEFAULT_POP_FILE):
+    """
+    Shortcut to load the population file with the mask to remove areas of
+    water and non-populated areas (population < 1e-8)
+
+    Args:
+        population_file: path to population input file which includes 'population'
+         and 'water_mask' variables
+
+    Returns:
+        population dataset including masked population data and water mask
+    """
+    data: xr.Dataset = xr.open_dataset(str(population_file),
+                                       chunks={'year': 2})
+
+    if 'lon' in data.dims:
+        data = data.rename({'lon': 'longitude', 'lat': 'latitude'})
+
+    data['empty_mask'] = data.water_mask & (data.population > 1e-08)
+    data['population'] = data.water_mask * data.population.where(data.population > 1e-08)
+    return data
+
 # TODO adjust tqdm to work in notebook and non-notebook
-# TODO simplify code, probably don't really need the context manager anymore.
 def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
                           population_file=DEFAULT_POP_FILE):
     """
@@ -438,24 +380,27 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
         # Default to current year
         end_year = datetime.datetime.now().year
 
-    with PopulationProjector(population_file,) as pop_file:
-        if weights is not None:
-            pop_sel = (pop_file.population * weights).compute()
-        else:
-            pop_sel = pop_file.population
-        pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
+    # with PopulationLoader(population_file, ) as pop_file:
+    pop_data = load_masked_population(population_file)
+    if weights is not None:
+        pop_sel = (pop_data.population * weights).compute()
+    else:
+        pop_sel = pop_data.population
+    pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
-        def do(year):
-            proj = pop_file.project_param(data.sel(year=year))
-            proj = proj * pop_sel.sel(year=year)
-            if norm:
-                proj = proj / pop_sum.sel(year=year)
-            return proj.compute()
+    def do(year):
+        proj = project_param(pop_sel, data.sel(year=year))
+        proj = proj * pop_sel.sel(year=year)
+        if norm:
+            proj = proj / pop_sum.sel(year=year)
+        return proj.compute()
 
-        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
-        exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
-                                     skipna=True).compute()
-        return exposures_ts
+    exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
+    exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
+                                 skipna=True).compute()
+
+    pop_data.close()
+    return exposures_ts
 
 
 N_ITERS_DEREZ = 3  # equivalent to 1/8th original resolution
