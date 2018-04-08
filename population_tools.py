@@ -222,9 +222,6 @@ def get_affine(data):
     return get_affine_latlon(lat, lon)
 
 
-
-
-
 def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
     """
     Rasterize a geopandas table with a geometry column
@@ -266,7 +263,6 @@ def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
     return raster
 
 
-# @jit(cache=True)
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon):
     reproj = np.empty(shape=shape)
     # TODO do you really need rasterio? could just use scipy interp.
@@ -281,12 +277,9 @@ def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon)
     # Wrap as DataArray to make sure the coordinates line up
     reproj = xr.DataArray(reproj,
                           coords={'latitude': out_lat,
-                                  'longitude': out_lon,
-                                  # 'time': out_time
+                                  'longitude': out_lon
                                   },
-                          dims=['latitude', 'longitude',
-                                # 'time'
-                                ])
+                          dims=['latitude', 'longitude'])
     return reproj
 
 
@@ -307,10 +300,10 @@ def project_param(target: xr.DataArray, param: xr.DataArray, crs=None):
 
     crs = crs if crs else CRS({'init': 'epsg:4326'})
 
-    return reproject_to((1, *target.shape), param, input_affine, target_affine, crs,
-                        target.latitude, target.longitude)
-    # return reproject_to(target.shape, param, input_affine, target_affine, crs,
+    # return reproject_to((1, *target.shape), param, input_affine, target_affine, crs,
     #                     target.latitude, target.longitude)
+    return reproject_to(target.shape, param, input_affine, target_affine, crs,
+                        target.latitude, target.longitude)
 
 
 DEFAULT_POP_FILE = POP_DATA_SRC / 'population_count_2000-2020_eightres.nc'
@@ -341,7 +334,9 @@ def load_masked_population(population_file=DEFAULT_POP_FILE):
 
 # TODO adjust tqdm to work in notebook and non-notebook
 def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
-                          population_file=DEFAULT_POP_FILE):
+                          population_file=DEFAULT_POP_FILE,
+                          get_ts=True  # Shortcut, if you want the 3D grid rather then just the time series
+                          ):
     """
     Resample a gridded timeseries dataset to match the grid of the given population file
     and multiply the values in each cell by the corresponding population, optionally
@@ -377,6 +372,8 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
         crs = CRS({'init': 'epsg:4326'})
 
         # This avoids trying to compute everything at once, which would use too much RAM
+        # TODO could re-write as ufunc to apply to pop_data, data pair and defer more stuff to play nice with Dask
+        # Idea is to make exposure constructing op return dask object
         def do(year):
             pop = pop_sel.sel(year=year).load()
 
@@ -386,15 +383,22 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
                                 pop_data.latitude, pop_data.longitude)
 
             proj = proj * pop
-            if norm:
-                proj = proj / pop_sum
-            return proj.compute().squeeze()
-        # TODO if we are only calculating the sum, don
-        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
-        exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
-                                     skipna=True).compute()
 
-    return exposures_ts
+            return proj.compute().squeeze()
+
+        # TODO if we are only calculating the sum, do we need to bother creating a dataarray first.
+        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
+
+        if norm:
+            exposures = exposures / pop_sum
+
+        if get_ts:
+            exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
+                                         skipna=True).compute()
+            return exposures_ts
+
+        else:
+            return exposures
 
 
 # TODO clean this part up/move to notebook with explanations. Clean up global settings vars
