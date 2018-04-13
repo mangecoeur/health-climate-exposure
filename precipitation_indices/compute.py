@@ -17,7 +17,7 @@ from . import utils
 # logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------------------------------------------------
 
-
+# TODO support nopython mode by converting convolve call to 2 argument form.
 @jit(nogil=True)
 def sum_to_scale(values,
                  scale):

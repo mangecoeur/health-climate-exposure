@@ -12,7 +12,7 @@ dependencies:
   - netcdf4
   - pip
   - psycopg2
-  - python=3.6.2=0
+  - python=3.6
   - sqlalchemy
   - dask
   - distributed

@@ -130,20 +130,17 @@ def spei_gamma(precips_mm, months_scale, pet_mm=None, temps_celsius=None, data_s
         # since we have temperature then it's expected that we'll compute PET internally, so we shouldn't have PET as an input
         if pet_mm is not None:
             message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both'
-            # logger.error(message)
             raise ValueError(message)
 
         # we'll need both the latitude and data start year in order to compute PET 
         elif (latitude_degrees is None) or (data_start_year is None):
             message = 'Missing arguments: since temperature is provided as an input then both latitude ' + \
                       'and the data start year must also be specified, and one or both is not'
-            # logger.error(message)
             raise ValueError(message)
 
         # validate that the two input arrays are compatible
         elif precips_mm.size != temps_celsius.size:
             message = 'Incompatible precipitation and temperature arrays'
-            # logger.error(message)
             raise ValueError(message)
 
         # compute PET
@@ -154,20 +151,17 @@ def spei_gamma(precips_mm, months_scale, pet_mm=None, temps_celsius=None, data_s
         # since we have PET as input we shouldn't have temperature as an input
         if temps_celsius is not None:
             message = 'Incompatible arguments: either temperature or PET arrays can be specified as arguments, but not both.'
-            # logger.error(message)
             raise ValueError(message)
 
         # make sure there's no confusion by not allowing a user to specify unnecessary parameters 
         elif (latitude_degrees is not None) or (data_start_year is not None):
             message = 'Extraneous arguments: since PET is provided as an input then both latitude ' + \
                       'and the data start year must not also be specified, and one or both is.'
-            # logger.error(message)
             raise ValueError(message)
 
         # validate that the two input arrays are compatible
         elif precips_mm.size != pet_mm.size:
             message = 'Incompatible precipitation and PET arrays'
-            # logger.error(message)
             raise ValueError(message)
 
     # subtract the PET from precipitation, adding an offset to ensure that all values are positive
