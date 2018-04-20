@@ -23,9 +23,13 @@ _FITTED_INDEX_VALID_MAX = 3.09
 # -------------------------------------------------------------------------------------------------------------------------------------------
 
 
-@jit(float64[:](float64[:], int64))
+@jit(float64[:](float64[:], int64, int64, int64, int64))
 def spi_gamma(precips,
-              months_scale):
+              months_scale,
+              data_start_year=None,
+              calibration_year_initial=None,
+              calibration_year_final=None
+              ):
     '''
     Computes monthly SPI using a fitting to the gamma distribution.
     
@@ -41,8 +45,24 @@ def spi_gamma(precips,
     # get a sliding sums array, with each month's value scaled by the specified number of months
     scaled_precips = compute.sum_to_scale(precips, months_scale)
 
+    # Validate the dates
+    if data_start_year is None and calibration_year_initial is None and calibration_year_final is None:
+        # if no dates are supplied will default to using whole range of data
+        # set an arbitrary start year - this will not affect the calculation.
+        data_start_year=1901
+
+    if calibration_year_initial is None:
+        calibration_year_initial = data_start_year
+
+    if calibration_year_final is None:
+        # value >> than likely end year to force transform fitted gamma to just use the all the data
+        calibration_year_final = 9999
+
     # fit the scaled values to a gamma distribution and transform the values to corresponding normalized sigmas 
-    transformed_fitted_values = compute.transform_fitted_gamma(scaled_precips)
+    transformed_fitted_values = compute.transform_fitted_gamma(scaled_precips,
+                                                               data_start_year,
+                                                               calibration_year_initial,
+                                                               calibration_year_final)
 
     # clip values to within the valid range, reshape the array back to 1-D
     spi = np.clip(transformed_fitted_values, _FITTED_INDEX_VALID_MIN, _FITTED_INDEX_VALID_MAX).flatten()
@@ -56,8 +76,8 @@ def spi_gamma(precips,
 def spi_pearson(precips,
                 months_scale,
                 data_start_year,
-                calibration_year_initial=1981,
-                calibration_year_final=2010):
+                calibration_year_initial,
+                calibration_year_final):
     '''
     Computes monthly SPI using a fitting to the Pearson Type III distribution.
     

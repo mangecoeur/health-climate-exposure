@@ -1,4 +1,3 @@
-import logging
 import math
 from math import exp, lgamma, pi, sqrt
 
@@ -9,13 +8,73 @@ from numba import float64, jit
 
 from . import utils
 
+
+# ----------------------------------------------------------------------------------------------------------------------
+@jit(float64(float64), nopython=True, nogil=True)
+def _error_function(value):
+    """
+    TODO
+
+    :param value:
+    :return:
+    """
+
+    result = 0.0
+    if value != 0.0:
+
+        absValue = abs(value)
+
+        if absValue > 6.25:
+            if value < 0:
+                result = -1.0
+            else:
+                result = 1.0
+        else:
+            exponential = exp(value * value * (-1))
+            sqrtOfTwo = sqrt(2.0)
+            zz = abs(value * sqrtOfTwo)
+            if absValue > 5.0:
+                # alternative error function calculation for when the input value is in the critical range
+                result = exponential * (sqrtOfTwo / pi) / \
+                         (absValue + 1 / (zz + 2 / (zz + 3 / (zz + 4 / (zz + 0.65)))))
+
+            else:
+                # coefficients of rational-function approximation
+                P0 = 220.2068679123761
+                P1 = 221.2135961699311
+                P2 = 112.0792914978709
+                P3 = 33.91286607838300
+                P4 = 6.373962203531650
+                P5 = 0.7003830644436881
+                P6 = 0.03526249659989109
+                Q0 = 440.4137358247522
+                Q1 = 793.8265125199484
+                Q2 = 637.3336333788311
+                Q3 = 296.5642487796737
+                Q4 = 86.78073220294608
+                Q5 = 16.06417757920695
+                Q6 = 1.755667163182642
+                Q7 = 0.08838834764831844
+
+                # calculate the error function from the input value and constant values
+                result = exponential * ((((((P6 * zz + P5) * zz + P4) * zz + P3) * zz + P2) * zz + P1) * zz + P0) / \
+                         (((((((Q7 * zz + Q6) * zz + Q5) * zz + Q4) * zz + Q3) * zz + Q2) * zz + Q1) * zz + Q0)
+
+            if value > 0.0:
+                result = 1 - result
+            elif value < 0:
+                result = result - 1.0
+
+    return result
+
 # -----------------------------------------------------------------------------------------------------------------------
-# set up a basic, global logger
-# logging.basicConfig(level=logging.WARN,
-#                     format='%(asctime)s %(levelname)s %(message)s',
-#                     datefmt='%Y-%m-%d  %H:%M:%S')
-# logger = logging.getLogger(__name__)
-# -----------------------------------------------------------------------------------------------------------------------
+def _count_zeros_and_non_missings(values):
+    # count the number of zeros and non-missing (non-NaN) values
+    zeros = values.size - np.count_nonzero(values)
+    non_missings = np.count_nonzero(~np.isnan(values))
+
+    return zeros, non_missings
+
 
 # TODO support nopython mode by converting convolve call to 2 argument form.
 @jit(nogil=True)
@@ -55,13 +114,6 @@ def sum_to_scale(values,
     return np.hstack(([np.NaN] * (scale - 1), sliding_sums))
 
 
-# -----------------------------------------------------------------------------------------------------------------------
-def _count_zeros_and_non_missings(values):
-    # count the number of zeros and non-missing (non-NaN) values
-    zeros = values.size - np.count_nonzero(values)
-    non_missings = np.count_nonzero(~np.isnan(values))
-
-    return zeros, non_missings
 
 
 # -----------------------------------------------------------------------------------------------------------------------
@@ -224,6 +276,7 @@ def _pearson3_fitting_values(values,
 
     # make sure that we have data within the full calibration period, otherwise use the full period of record
     if (calibration_start_year < data_start_year) or (calibration_end_year > data_end_year):
+        # TODO raise warning
         # logger.info('Insufficient data for the specified calibration period ({0}-{1}), instead using the full period ' +
         #             'of record ({2}-{3})'.format(calibration_start_year,
         #                                          calibration_end_year,
@@ -336,64 +389,6 @@ def _pearson3cdf(value,
     return result
 
 
-# ----------------------------------------------------------------------------------------------------------------------
-@jit(float64(float64), nopython=True, nogil=True)
-def _error_function(value):
-    """
-    TODO
-
-    :param value:
-    :return:
-    """
-
-    result = 0.0
-    if value != 0.0:
-
-        absValue = abs(value)
-
-        if absValue > 6.25:
-            if value < 0:
-                result = -1.0
-            else:
-                result = 1.0
-        else:
-            exponential = exp(value * value * (-1))
-            sqrtOfTwo = sqrt(2.0)
-            zz = abs(value * sqrtOfTwo)
-            if absValue > 5.0:
-                # alternative error function calculation for when the input value is in the critical range
-                result = exponential * (sqrtOfTwo / pi) / \
-                         (absValue + 1 / (zz + 2 / (zz + 3 / (zz + 4 / (zz + 0.65)))))
-
-            else:
-                # coefficients of rational-function approximation
-                P0 = 220.2068679123761
-                P1 = 221.2135961699311
-                P2 = 112.0792914978709
-                P3 = 33.91286607838300
-                P4 = 6.373962203531650
-                P5 = 0.7003830644436881
-                P6 = 0.03526249659989109
-                Q0 = 440.4137358247522
-                Q1 = 793.8265125199484
-                Q2 = 637.3336333788311
-                Q3 = 296.5642487796737
-                Q4 = 86.78073220294608
-                Q5 = 16.06417757920695
-                Q6 = 1.755667163182642
-                Q7 = 0.08838834764831844
-
-                # calculate the error function from the input value and constant values
-                result = exponential * ((((((P6 * zz + P5) * zz + P4) * zz + P3) * zz + P2) * zz + P1) * zz + P0) / \
-                         (((((((Q7 * zz + Q6) * zz + Q5) * zz + Q4) * zz + Q3) * zz + Q2) * zz + Q1) * zz + Q0)
-
-            if value > 0.0:
-                result = 1 - result
-            elif value < 0:
-                result = result - 1.0
-
-    return result
-
 
 # -----------------------------------------------------------------------------------------------------------------------
 @jit
@@ -414,7 +409,6 @@ def transform_fitted_pearson(monthly_values,
 
     # if we're passed all missing values then we can't compute anything, return the same array of missing values
     if np.all(np.isnan(monthly_values)):
-        # logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
         return monthly_values
 
     # validate (and possibly reshape) the input array
@@ -427,7 +421,6 @@ def transform_fitted_pearson(monthly_values,
 
         # neither a 1-D nor a 2-D array with valid shape was passed in
         message = 'Invalid input array with shape: {0}'.format(monthly_values.shape)
-        # logger.error(message)
         raise ValueError(message)
 
     # compute the values we'll use to fit to the Pearson Type III distribution
@@ -486,20 +479,24 @@ def transform_fitted_pearson(monthly_values,
 
 # -----------------------------------------------------------------------------------------------------------------------
 @jit(nogil=True)
-def transform_fitted_gamma(monthly_values):
-    '''
-    TODO explain this    
+def transform_fitted_gamma(monthly_values,
+                           data_start_year,
+                           calibration_start_year,
+                           calibration_end_year
+                           ):
+    """
+    TODO explain this
 
-    :param monthly_values: an array of monthly values, either 1-D or 2-D with each row representing 
-                           a year containing twelve columns representing the respective calendar months
-    :return: 2-D array of monthly values, corresponding in size and shape of the input array if the input is 2-D, or if the input array  
-             is 1-D then an equivalent 2-D array with NaN values used to fill the missing months of the final year, if any
-    :rtype: numpy.ndarray of floats
-    '''
+    :param monthly_values: an array of monthly values, either 1-D or 2-D with each row representing a year containing
+    twelve columns representing the respective calendar months :return: 2-D array of monthly values, corresponding in
+    size and shape of the input array if the input is 2-D, or if the input array is 1-D then an equivalent 2-D array
+    with NaN values used to fill the missing months of the final year, if any :rtype: numpy.ndarray of floats
+
+    :return
+    """
 
     # if we're passed all missing values then we can't compute anything, return the same array of missing values
     if np.all(np.isnan(monthly_values)):
-        # logger.info('An array of all fill values was passed as the argument, no action taken, returning the same array')
         return monthly_values
 
     # validate (and possibly reshape) the input array
@@ -512,21 +509,34 @@ def transform_fitted_gamma(monthly_values):
 
         # neither a 1-D nor a 2-D array with valid shape was passed in
         message = 'Invalid input array with shape: {0}'.format(monthly_values.shape)
-        # logger.error(message)
         raise ValueError(message)
 
+    data_end_year = data_start_year + monthly_values.shape[0]
+
+    # make sure that we have data within the full calibration period, otherwise use the full period of record
+    if (calibration_start_year < data_start_year) or (calibration_end_year > data_end_year):
+        calibration_start_year = data_start_year
+        calibration_end_year = data_end_year
+
+    # get the year axis indices corresponding to the calibration start and end years
+    calibration_begin_index = (calibration_start_year - data_start_year)
+    calibration_end_index = (calibration_end_year - data_start_year) + 1
+
+    # Select calibration data rows
+    monthly_values_calibration = monthly_values[calibration_begin_index:calibration_end_index, :]
+
     # find the percentage of zero values for each month
-    zeros = (monthly_values == 0).sum(axis=0)
-    probabilities_of_zero = zeros / monthly_values.shape[0]
+    zeros = (monthly_values_calibration == 0).sum(axis=0)
+    probabilities_of_zero = zeros / monthly_values_calibration.shape[0]
 
     # replace zeros with NaNs
-    monthly_values[monthly_values == 0] = np.NaN
+    monthly_values_calibration[monthly_values_calibration == 0] = np.NaN
 
     # compute the gamma distribution's shape and scale parameters, alpha and beta
     # TODO explain this better
-    means = np.nanmean(monthly_values, axis=0)
+    means = np.nanmean(monthly_values_calibration, axis=0)
     log_means = np.log(means)
-    logs = np.log(monthly_values)
+    logs = np.log(monthly_values_calibration)
     mean_logs = np.nanmean(logs, axis=0)
     A = log_means - mean_logs
     alphas = (1 + np.sqrt(1 + 4 * A / 3)) / (4 * A)
@@ -535,8 +545,8 @@ def transform_fitted_gamma(monthly_values):
     # find the gamma probability values using the gamma CDF
     gamma_probabilities = scipy.stats.gamma.cdf(monthly_values, a=alphas, scale=betas)
 
-    # TODO explain this
-    # (normalize including the probability of zero, putting into the range [0..1]?)    
+    # Since Gamma is not defined at 0, but there can be months with zero precipitation,
+    # need to combine the gamma distribution with the zero probilbilities
     probabilities = probabilities_of_zero + ((1 - probabilities_of_zero) * gamma_probabilities)
 
     # the values we'll return are the values at which the probabilities of a normal distribution are less than or equal to

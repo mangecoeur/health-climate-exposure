@@ -265,7 +265,7 @@ def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
 
 def reproject_to(shape, src_data, src_affine, out_affine, crs, out_lat, out_lon):
     reproj = np.empty(shape=shape)
-    # TODO do you really need rasterio? could just use scipy interp.
+
     reproject(
         src_data.values, reproj,
         src_transform=src_affine,
@@ -332,8 +332,8 @@ def load_masked_population(population_file=DEFAULT_POP_FILE):
     return data
 
 
-# TODO adjust tqdm to work in notebook and non-notebook
-def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
+def project_to_population(data: xr.DataArray,
+                          weights=None, norm=False, start_year=2000, end_year=None,
                           population_file=DEFAULT_POP_FILE,
                           get_ts=True  # Shortcut, if you want the 3D grid rather then just the time series
                           ):
@@ -341,7 +341,7 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
     Resample a gridded timeseries dataset to match the grid of the given population file
     and multiply the values in each cell by the corresponding population, optionally
     normalising by the total population
-    
+
     Args:
         data: the yearly data to project to the population grid
         weights: an optional grid with same dimensions as the population grid containing
@@ -355,51 +355,182 @@ def project_to_population(data, weights=None, norm=False, start_year=2000, end_y
     Returns:
         time series of population weighted and optionally `weights` weighted time series
     """
-    if end_year is None:
-        # Default to current year
-        end_year = datetime.datetime.now().year
+    # For convenience, accpet bot lat/lon and latitude/longitude
+    if 'lon' in data.dims:
+        data = data.rename({
+            'lat': 'latitude',
+            'lon': 'longitude'
+        })
+
+
+    data_time_dim = 'year'
+    if data_time_dim not in data.dims:
+        if 'time' not in data.dims:
+            raise ValueError('data input must have a time-dimension named "time" or "year"')
+        data_time_dim = 'time'
+
+    if 'year' not in data.dims:
+        data['year'] = data['time.year']
 
     with load_masked_population(population_file) as pop_data:
-        if weights is not None:
-            pop_sel = (pop_data.population * weights)
-        else:
-            pop_sel = pop_data.population
-        pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
 
-        target_shape = (len(pop_data.latitude), len(pop_data.longitude))
+        if end_year is None:
+            # Default to end of data
+            end_year = np.asscalar(data['year'][-1])
+            if 'time' in data.dims:
+                end_time = data['time'][-1]
+
+
+        if start_year is None:
+            # If no start year is given, give the most recent of the data or the population data
+            start_year = np.max(np.asscalar(data['year'][0]),
+                                np.asscalar(pop_data['year'][0]))
+
+        if weights is not None:
+            pop_in = (pop_data.population * weights)
+        else:
+            pop_in = pop_data.population
+
         target_affine = get_affine(pop_data)
         input_affine = get_affine(data)
-        crs = CRS({'init': 'epsg:4326'})
 
-        # This avoids trying to compute everything at once, which would use too much RAM
-        # TODO could re-write as ufunc to apply to pop_data, data pair and defer more stuff to play nice with Dask
-        # Idea is to make exposure constructing op return dask object
-        def do(year):
-            pop = pop_sel.sel(year=year).load()
+        def resample_ufunc(data_chunk, pop_chunk):
+            out = np.empty(shape=pop_chunk.shape)
+            crs = CRS({'init': 'epsg:4326'})
 
-            proj = reproject_to(target_shape,
-                                data.sel(year=year).load(),
-                                input_affine, target_affine, crs,
-                                pop_data.latitude, pop_data.longitude)
+            for i in range(data_chunk.shape[0]):
+                data_slice = data_chunk[i, :, :]
+                out_slice = np.empty(shape=pop_chunk.shape[1:])
+                reproject(
+                    data_slice, out_slice,
+                    src_transform=input_affine,
+                    dst_transform=target_affine,
+                    src_crs=crs,
+                    dst_crs=crs,
+                    resample=Resampling.cubic_spline)
 
-            proj = proj * pop
+                out[i, :, :] = out_slice * pop_chunk[i, :, :]
 
-            return proj.compute().squeeze()
+            return out
 
-        # TODO if we are only calculating the sum, do we need to bother creating a dataarray first.
-        exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
+        # Select only the matching years so that apply_ufunc can join
+        # on the year axis
+        data_in = data.sel(year=slice(start_year, end_year))
+        pop_in = pop_in.sel(year=slice(start_year, end_year))
+
+        # Rename the lat/lon on the population so we can join the datasets on
+        # year but make xarray understand that the lat/lon coords are different
+        # for the different resolution datasets, otherwise it will try to join
+        # using the coords but since we are resampling different resolutions
+        # this will fail since they are different sizes
+        pop_in = pop_in.rename({'latitude': 'pop_lat', 'longitude': 'pop_lon'})
+
+        exposures = xr.apply_ufunc(resample_ufunc,
+                                   data_in, pop_in,
+                                   input_core_dims=[['latitude', 'longitude'], ['pop_lat', 'pop_lon']],
+                                   output_core_dims=[['pop_lat', 'pop_lon']],
+                                   dataset_join='outer',
+                                   dask='parallelized',
+                                   output_dtypes=[np.float64]
+                                   )
+
+        # We used the 'pop_lon/lat' as output dimensions to avoid name conflict, now rename to the normal name
+        exposures = exposures.rename({'pop_lat': 'latitude',
+                                      'pop_lon': 'longitude'})
 
         if norm:
-            exposures = exposures / pop_sum
+            exposures = exposures / pop_in.sum(dim=['pop_lat', 'pop_lon'], skipna=True)
 
         if get_ts:
             exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
-                                         skipna=True).compute()
+                                         skipna=True)
             return exposures_ts
 
         else:
             return exposures
 
+
+# def project_to_population(data, weights=None, norm=False, start_year=2000, end_year=None,
+#                           population_file=DEFAULT_POP_FILE,
+#                           get_ts=True  # Shortcut, if you want the 3D grid rather then just the time series
+#                           ):
+#     """
+#     Resample a gridded timeseries dataset to match the grid of the given population file
+#     and multiply the values in each cell by the corresponding population, optionally
+#     normalising by the total population
+#
+#     Args:
+#         data: the yearly data to project to the population grid
+#         weights: an optional grid with same dimensions as the population grid containing
+#         weightings for each cell, e.g. the fraction of the population to be considered for
+#         the given data
+#         norm (bool): whether to normalise by the total population, default False
+#         start_year:
+#         end_year:
+#         population_file: name of the population NetCDF file to use
+#
+#     Returns:
+#         time series of population weighted and optionally `weights` weighted time series
+#     """
+#     if end_year is None:
+#         # Default to current year
+#         end_year = datetime.datetime.now().year
+#
+#     with load_masked_population(population_file) as pop_data:
+#         if weights is not None:
+#             pop_sel = (pop_data.population * weights)
+#         else:
+#             pop_sel = pop_data.population
+#         pop_sum = pop_sel.sum(dim=['latitude', 'longitude'], skipna=True)
+#
+#         target_shape = (len(pop_data.latitude), len(pop_data.longitude))
+#         target_affine = get_affine(pop_data)
+#         input_affine = get_affine(data)
+#         crs = CRS({'init': 'epsg:4326'})
+#
+#         # This avoids trying to compute everything at once, which would use too much RAM
+#         # TODO could re-write as ufunc to apply to pop_data, data pair and defer more stuff to play nice with Dask
+#         # Idea is to make exposure constructing op return dask object
+#         def do(year):
+#             pop = pop_sel.sel(year=year).load()
+#
+#             proj = reproject_to(target_shape,
+#                                 data.sel(year=year).load(),
+#                                 input_affine, target_affine, crs,
+#                                 pop_data.latitude, pop_data.longitude)
+#
+#             proj = proj * pop
+#
+#             return proj.compute().squeeze()
+#
+#         def do_ufunc(year):
+#             pop = pop_sel.sel(year=year).load()
+#
+#             proj = reproject_to(target_shape,
+#                                 data.sel(year=year).load(),
+#                                 input_affine, target_affine, crs,
+#                                 pop_data.latitude, pop_data.longitude)
+#
+#             proj = proj * pop
+#
+#             return proj.compute().squeeze()
+#
+#         xr.apply_ufunc(do_ufunc
+#
+#                        )
+#         # TODO if we are only calculating the sum, do we need to bother creating a dataarray first.
+#         exposures: xr.DataArray = xr.concat((do(year) for year in tnrange(start_year, end_year + 1)), dim='year')
+#
+#         if norm:
+#             exposures = exposures / pop_sum
+#
+#         if get_ts:
+#             exposures_ts = exposures.sum(dim=['latitude', 'longitude'],
+#                                          skipna=True).compute()
+#             return exposures_ts
+#
+#         else:
+#             return exposures
 
 # TODO clean this part up/move to notebook with explanations. Clean up global settings vars
 
