@@ -61,3 +61,5 @@ country_briefs/.DS_Store
 .DS_Store
 
 *.nc
+
+dask-worker-space/
