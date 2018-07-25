@@ -4,6 +4,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - cartopy
   - h5netcdf
   - h5py
   - joblib
