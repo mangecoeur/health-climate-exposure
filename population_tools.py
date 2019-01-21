@@ -222,6 +222,7 @@ def get_affine(data):
     return get_affine_latlon(lat, lon)
 
 
+# FIXME i think i'm roll'ing the data twice in many cases!
 def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
     """
     Rasterize a geopandas table with a geometry column
@@ -249,7 +250,6 @@ def rasterize_data(target_dataset, table, key, affine=None) -> np.ndarray:
     """
     # NOTE: it seems that rasterize wants -180 to 180, even though it should accept arbitrary affine :/
     # Figure out the transform from the geopandas to the raster
-    # affine = Affine(self.population_affine.a, 0, px, 0, self.population_affine.e, self.population_affine.f)
     affine = affine if affine else get_affine(target_dataset)
 
     raster = features.rasterize(
